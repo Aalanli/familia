@@ -14,7 +14,9 @@ term : "this" -> this
 
 typedef : "type" NAME "=" "{" [arg] ("," arg)* "}"
 
-arg : NAME ":" type
+arg : 
+    | NAME ":" type -> arg
+    | "this" -> this_arg
 
 function_decl : "fn" NAME "(" [arg] ("," arg)* ")" [":" NAME] 
 function_def : function_decl "{" stmt* "}"
@@ -23,24 +25,22 @@ class_def : "class" NAME "for" NAME "{" (typedef | function_def)* "}"
 interface_def : "interface" NAME "{" function_decl* "}"
 
 stmt : 
-    | decl_stmt
-    | return_stmt
+    | expr ";"
+    | "let" NAME "=" expr ";" -> let_stmt
+    | "return" expr ";" -> return_stmt
 
-decl_stmt : "let" NAME "=" expr ";"
-return_stmt : "return" expr ";"
 
 expr :
-    | "(" expr ")"
     | term
-    | numeric_expr
-    | expr "." NAME ["(" [expr] ("," expr)* ")"]
-    | NAME "(" [expr] ("," expr)* ")"
+    | "(" expr bin_op expr ")" -> bin_op_expr
+    | expr call_parens -> call_expr
+    | [NAME] "{" [NAME ":" expr] ("," NAME ":" expr)* "}" -> constructor_expr
+    | expr "." NAME -> get_attr
+    | "(" expr ")"
+    | colon_access
 
-
-numeric_expr : term bin_op term 
-    | term bin_op "(" expr ")"
-    | "(" expr ")" bin_op term
-    | "(" expr ")" bin_op "(" expr ")"
+colon_access : NAME "::" NAME | colon_access "::" NAME
+call_parens : "(" [expr] ("," expr)* ")"
 
 bin_op : "+" -> add
     | "-" -> sub
