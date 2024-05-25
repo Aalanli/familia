@@ -1,0 +1,93 @@
+
+interface Integral {
+    fn zero(): This
+    fn one(): This
+    fn add(this, other: This): This // TODO: make declarations not require names
+    fn mul(this, other: This): This
+}
+
+class i32 for Integral(i32) { // allow aliasing of type names since classes are not types?
+    fn zero(): This {
+        return 0;
+    }
+
+    fn one(): This {
+        return 1;
+    }
+
+    fn add(this, other: This): This {
+        return this + other;
+    }
+
+    fn mul(this, other: This): This {
+        return this + other;
+    }
+}
+
+class i32x2 for Integral {
+    type This = {
+        a: i32, b: i32
+    }
+
+    fn zero(): This { return {a: 0, b: 0}; }
+    fn one(): This { return {a: 1, b: 1}; }
+    fn add(this, other: This): This {
+        return {a: this.a + other.a, b: this.b + other.b};
+    }
+    fn mul(this, other: This): This {
+        return {a: this.a * other.a, b: this.b * other.b};
+    }
+}
+
+interface Monoid {
+    fn zero(): This
+    fn mul(this, other: This): This
+}
+
+class integralM1 for Monoid(Integral with i) { // existential use of class i
+    fn zero(this): This {
+        return i.zero();
+    }
+    
+    fn mul(this, other: This): This {
+        return this.(i.add)(other);
+    }
+}
+
+class integralM2 for Monoid(Integral with i) {
+    fn zero(this): This {
+        return i.one();
+    }
+    
+    fn mul(this, other: This): This {
+        return this.(i.mul)(other);
+    }
+}
+
+fn mplus[M where Monoid](a: M, b: M) { // function parametric constraint is equivalent to interface/class parametric constraint
+    return a.mul(b);
+}
+
+interface MReduce[E where Monoid(E)] {
+    fn reduce(this): E
+}
+
+
+fn main() {
+    let a: Integral with i32 = i32(1);
+    let b: Integral with i32x2 = i32x2({a: 1, b: 2});
+
+    let m1: Monoid(Integral with i32) with integralM1 = integralM1(a);
+    let m2: Monoid(Integral with i32x2) with integralM1 = integralM1(b);
+    let m3: Monoid(Integral with i32) with integralM2 = integralM2(b);
+    let m4: Monoid(Integral with i32x2) with integralM2 = integralM2(b);
+
+    mplus[Monoid(Integral with i32) with integralM1](m1, m1);
+    mplus[Monoid(_) with integralM1](m2, m2);
+
+    mplus[Monoid(_) with integralM2](m3, m3);
+    mplus[Monoid(_) with integralM2](m4, m4);
+
+    // error: mplus(m3, m4);
+    // error: mplus(m1, m3);
+}

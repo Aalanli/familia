@@ -18,29 +18,29 @@ arg :
     | NAME ":" type -> arg
     | "this" -> this_arg
 
-function_decl : "fn" NAME "(" [arg] ("," arg)* ")" [":" NAME] 
+function_decl : "fn" NAME "(" [arg] ("," arg)* ")" [":" type] 
 function_def : function_decl "{" stmt* "}"
 
 class_def : "class" NAME "for" NAME "{" (typedef | function_def)* "}"
 interface_def : "interface" NAME "{" function_decl* "}"
 
-stmt : 
-    | expr ";"
-    | "let" NAME "=" expr ";" -> let_stmt
+?stmt : 
+    | expr ";" -> expr_stmt
+    | "let" (NAME | arg) "=" expr ";" -> let_stmt
     | "return" expr ";" -> return_stmt
 
 
-expr :
+?expr :
     | term
     | "(" expr bin_op expr ")" -> bin_op_expr
     | expr call_parens -> call_expr
-    | [NAME] "{" [NAME ":" expr] ("," NAME ":" expr)* "}" -> constructor_expr
+    | "{" NAME ":" expr ("," NAME ":" expr)* "}" -> constructor_expr
     | expr "." NAME -> get_attr
-    | "(" expr ")"
-    | colon_access
+    // | "(" expr ")"
+    // | colon_access
 
-colon_access : NAME "::" NAME | colon_access "::" NAME
-call_parens : "(" [expr] ("," expr)* ")"
+// colon_access : NAME "::" NAME | colon_access "::" NAME
+?call_parens : "(" [expr] ("," expr)* ")"
 
 bin_op : "+" -> add
     | "-" -> sub
@@ -48,7 +48,11 @@ bin_op : "+" -> add
     | "/" -> div
 
 NAME: /[^\W\d]\w*/
+%ignore COMMENT
+COMMENT: "//" /[^\n]*/ NEWLINE
+
 %import common.SIGNED_NUMBER
 
 %import common.WS
+%import common.NEWLINE
 %ignore WS

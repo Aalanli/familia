@@ -1,0 +1,67 @@
+
+interface Hello {
+    fn hello(this)
+}
+
+interface I1[E] where Hello(E) {
+    fn bye(this)
+}
+
+class c1 for Hello(This) {
+    type This = {
+        a: i32
+    }
+
+    fn hello(this) {
+        print("c1: ", this.a);
+    }
+}
+
+type Foo = {
+    b: i32
+}
+
+class c2 for Hello(Foo) {
+    fn hello(this) {
+        print("c2: ", this.b);
+    }
+}
+
+// using class with explicit model
+class ic1[E] for I1[E](This) where Hello(E) {
+    type This = {
+        a: E,
+        b: E
+    }
+
+    fn bye(this) {
+        this.a.hello();
+        print("ic1 bye.");        
+    }
+}
+
+// using the natural class
+class ic2 for I1[Hello](This) {
+    type This = {
+        a: Hello,
+        b: Hello
+    }
+
+    fn bye(this) {
+        this.a.hello();
+        print("ic2 bye");
+    }
+}
+
+fn hello_bye[T, E](a: T) where I1[E](T) {
+    a.bye();
+}
+
+fn main() {
+    let a = c1({a: 1});
+    let b = c2({b: 1});
+
+    let i1: I1[E] where Hello(E) with c1 = ic1({a: a, b: a});
+    // error: let i1: I1[E] where Hello(E) with c1 = ic1({a: a, b: a});
+    let i2: I1[Hello] = ic2({a: a, b: b});
+}

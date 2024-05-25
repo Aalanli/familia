@@ -1,0 +1,41 @@
+
+interface I1 {
+    fn hello(this)
+}
+
+class c1 for I1 {
+    type This = {
+        a: i32
+    }
+
+    fn hello(this) {
+        print("c1: ", this.a);
+    }
+}
+
+class c2 for I1 {
+    type This = {
+        b: i32
+    }
+
+    fn hello(this) {
+        print("c2: ", this.b);
+    }
+}
+
+fn say_hello[T where I1](x: T) {
+    x.hello();
+}
+
+fn say_hello2(x: I1) {
+    x.hello();
+}
+
+fn say_hello3[T](x: T) where I1(T) c {
+    x.(c.hello)();
+}
+
+fn main() {
+    let a: I1 with c1 = c1({a: 1});
+    let b: I1 with c2 = c2({b: 1});
+}
