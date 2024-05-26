@@ -44,17 +44,29 @@ interface Monoid {
     fn mul(this, other: This): This
 }
 
-class integralM1 for Monoid(Integral with i) { // existential use of class i
+// This should be illegal, because the use of Integral is existential
+//     but Integral doesn't have an object type.
+// class integralM1 for Monoid(Integral with i) {
+//     fn zero(this): This {
+//         return i.zero();
+//     }
+//     
+//     fn mul(this, other: This): This {
+//         return this.(i.add)(other);
+//     }
+// }
+
+class integralM1[I] for Monoid(I) where Integral(I) i {
     fn zero(this): This {
         return i.zero();
     }
-    
+
     fn mul(this, other: This): This {
         return this.(i.add)(other);
     }
 }
 
-class integralM2 for Monoid(Integral with i) {
+class integralM2[I] for Monoid(I) where Integral(I) i {
     fn zero(this): This {
         return i.one();
     }
@@ -64,13 +76,20 @@ class integralM2 for Monoid(Integral with i) {
     }
 }
 
-fn mplus[M where Monoid](a: M, b: M) { // function parametric constraint is equivalent to interface/class parametric constraint
+// disallow [M where I] syntax for now.
+// fn mplus[M where Monoid](a: M, b: M) { // function parametric constraint is equivalent to interface/class parametric constraint
+//     return a.mul(b);
+// }
+
+// instead make everything explicit
+fn mplus[M](a: M, b: M) where Monoid(M) {
     return a.mul(b);
 }
 
-interface MReduce[E where Monoid(E)] {
-    fn reduce(this): E
-}
+
+// interface MReduce[E where Monoid(E)] {
+//     fn reduce(this): E
+// }
 
 
 fn main() {
