@@ -31,7 +31,7 @@ fn say_hello2(x: I1) {
     x.hello();
 }
 
-fn say_hello3[T](x: T) where I1(T) c {
+fn say_hello3[T](x: T) where c for I1(T) {
     x.(c.hello)();
 }
 
