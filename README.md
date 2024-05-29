@@ -23,6 +23,7 @@ See grammar.lark for formal grammar
 - further specialization on `This` parameters
 - existentials `Set[out String]`
 - other primitive types (`bool`, `f32`, `String`, `List`, `Dict`)
+- control flow: `if`, `while`, etc.
 
 **Notes**
 - reference sematics for now, everything is mutable and no free
