@@ -1,3 +1,4 @@
+// invoking various dispatcher classes for parametric polymorphism
 
 interface I1 {
     fn hello(this)
@@ -23,19 +24,26 @@ class c2 for I1 {
     }
 }
 
+// classic parametric polymorphism
 fn say_hello[T where I1](x: T) {
     x.hello();
 }
 
+// natural class
 fn say_hello2(x: I1) {
     x.hello();
 }
 
+// explicit class
 fn say_hello3[T](x: T) where c for I1(T) {
     x.(c.hello)();
 }
 
 fn main() {
-    let a: I1 with c1 = c1({a: 1});
-    let b: I1 with c2 = c2({b: 1});
+    let a: I1 = c1({a: 1});
+    let b: I1 = c2({b: 1});
+
+    say_hello[c1.This with c1]({a: 1});
+    say_hello(a);
+    
 }

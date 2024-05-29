@@ -1,3 +1,4 @@
+// parametric polymorphism within classes
 
 interface Hello {
     fn hello(this)

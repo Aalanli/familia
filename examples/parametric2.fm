@@ -1,3 +1,4 @@
+// parametric polymorphism without object type
 
 interface Integral {
     fn zero(): This

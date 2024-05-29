@@ -135,10 +135,10 @@ c1.foo(b, b);
 ```
 - 4 ways of enabling classes. Or different scopes compile down to `with c` in different ways.
 - not going to think about `out I` feature for now.
+- I think the further specialization example for `setPO` in figure 7 is not deeply related to the natural class polymorphism, and could be simulated with inheritance for object types. So not going to include it for now.
 
 ## Family polymorphism and inheritance
 - not sure what are the interesting interactions or design patterns that emerge when we add family polymorphism to the picture.
-- don't know what's useful about interfaces containing things other than methods. (Associated types can introduce some complications?)
 ```
 class c1 {
     interface I1 {
@@ -197,3 +197,7 @@ interface I3 extends c2.I1[type T = i32] {...}
 - \[E-PACK] is pretty straightforward
 - \[E-UNPACK] don't know why it's necessary for $X \notin FTV(T)$ and $p \notin FCV(T)$. However, I don't think this is too critical; standard virtual dispatch table applies in practice, where unpack is just a model.
 - \[E-CALL] Three ways to method call, natural class (corresponds to polymorphism), a named constraint class, or a concrete named class. 
+- Well-formedness of paths for figure 22 is more straightforward, just some rules for path correctness subject to syntax features.
+- Path linkages for Figure 23 is also pretty straightforward. Not going to look too precisely for now since its fairly orthogonal to the polymorphism features.
+- Constraint entailment: If $variance(\mathbb Q) = 0$ and $K \vdash T_2 \leq T_1$ then I think there is no subtyping relation between $Q(T_1) \leq Q(T_2)$? Assuming $0$ means invariant.
+  - otherwise everything is straightforward

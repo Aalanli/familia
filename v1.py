@@ -573,7 +573,7 @@ with open("grammar.lark", 'r') as f:
     grammar = f.read()
 parser = Lark(grammar, start='program', parser='earley')
 
-with open('basic.fm', 'r') as f:
+with open('examples/basic.fm', 'r') as f:
     tree = parser.parse(f.read())
 
 class PrintVars(Visitor):
