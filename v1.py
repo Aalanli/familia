@@ -1,4 +1,6 @@
 # %%
+from dataclasses import dataclass
+from enum import Enum
 from typing import List, Union, TypeVar, Generic, Optional, Dict, Any, Tuple, cast, Callable
 from lark import Lark, Tree
 
@@ -52,46 +54,6 @@ def join_doc(docs: List[Doc], sep: str) -> Doc:
         return Text('')
     return docs[0] * Concat([Text(sep) * d for d in docs[1:]])
 
-class Type:
-    def __init__(self, name):
-        self.name = name
-
-    def __str__(self):
-        return self.name
-    
-    def doc(self) -> Doc:
-        return Text(self.name)
-    
-    def __hash__(self) -> int:
-        return hash(self.name)
-    
-    def __eq__(self, other: object) -> bool:
-        return hash(self) == hash(other)
-
-class I32(Type):
-    def __init__(self):
-        super().__init__('i32')
-
-class This(Type):
-    def __init__(self):
-        super().__init__('This')
-
-class Self(Type):
-    def __init__(self):
-        super().__init__('Self')
-
-class Void(Type):
-    def __init__(self):
-        super().__init__('()')
-    
-    def __str__(self):
-        return '()'
-
-i32 = I32()
-this_t = This()
-self_t = Self()
-void_t = Void()
-
 
 class DocOptions:
     def __init__(self, show_link: bool = False):
@@ -120,13 +82,14 @@ class Transformer:
 
 class Visitor:
     def __call__(self, node: 'AST'):
-        assert isinstance(node, AST)
+        assert isinstance(node, AST), "expected AST node, got " + str(type(node))
         method_name = f'visit_{node.__class__.__name__}'
         if hasattr(self, method_name):
             method = getattr(self, method_name)
             method(node)
         else:
             node.visit(self)
+
 
 
 class AST:
@@ -142,22 +105,114 @@ class AST:
     def transform(self, visitor: Transformer) -> 'AST':
         raise NotImplementedError()
 
-
-class TypeAlias(AST):
-    def __init__(self, ty: Union[str, Type]):
-        self.type = ty
-        self.parent: Optional[AST] = None
+class Symbol(AST):
+    def __init__(self, names: Union[str, Tuple[str, ...]]):
+        self.names: Tuple[str, ...] = (names,) if isinstance(names, str) else names
 
     def doc(self, opt: DocOptions) -> Doc:
-        if opt.show_link:
-            if isinstance(self.type, str):
-                return Text(f'(?{self.type})')
-        return Text(f'{self.type}')
+        return Text('@' + '::'.join(self.names))
+    
+    def __hash__(self) -> int:
+        return hash(self.names)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Symbol) and self.names == other.names
     
     def visit(self, visitor: Visitor):
         pass
 
-    def transform(self, visitor: Transformer) -> 'TypeAlias':
+    def transform(self, visitor: Transformer) -> 'Symbol':
+        return self
+    
+
+class Type(AST):
+    def __hash__(self) -> int:
+        return hash(str(self))
+    
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Type) and hash(self) == hash(other)
+    
+    def visit(self, visitor: Visitor):
+        pass
+
+    def transform(self, visitor: Transformer) -> 'Type':
+        return self
+
+class I32(Type):
+    def doc(self, opt: DocOptions) -> Doc:
+        return Text('i32')
+
+class This(Type):
+    def doc(self, opt: DocOptions) -> Doc:
+        return Text('This')
+
+class Self(Type):
+    def doc(self, opt: DocOptions) -> Doc:
+        return Text('Self')
+
+class Void(Type):
+    def doc(self, opt: DocOptions) -> Doc:
+        return Text('()')
+
+class SymbolType(Type):
+    def __init__(self, sym: Symbol):
+        self.symbol = sym
+    
+    def doc(self, opt: DocOptions) -> Doc:
+        return Text(str(self.symbol))
+    
+    def __hash__(self) -> int:
+        return hash(self.symbol)
+
+class StructType(Type):
+    def __init__(self, fields: Dict[str, Type]):
+        self.fields = fields
+    
+    def doc(self, opt: DocOptions) -> Doc:
+        return Text('{') * join_doc([Text(f'{f}:') * ty.doc(opt) for f, ty in self.fields.items()], ', ') * Text('}')
+    
+    def visit(self, visitor: Visitor):
+        for _, f in self.fields.items():
+            f.visit(visitor)
+    
+    def transform(self, visitor: Transformer) -> 'StructType':
+        new_fields = {}
+        for f, ty in self.fields.items():
+            new_ty = visitor(ty)
+            assert isinstance(new_ty, Type)
+            new_fields[f] = new_ty
+        return StructType(new_fields)
+
+i32 = I32()
+this_t = This()
+self_t = Self()
+void_t = Void()
+
+class VarKind(Enum):
+    THIS = 0
+    SELF = 1
+    LOCAL = 2
+
+class Var(AST):
+    def __init__(self, name: str, ty: Optional[Type] = None, kind = VarKind.LOCAL):
+        self.name = name
+        self.ty = ty
+        self.kind = kind
+    
+    def doc(self, opt: DocOptions) -> Doc:
+        if opt.show_link and self.ty is None:
+            return Text(f'(?ty {self.name})')
+        return Text(self.name)
+    
+    def visit(self, visitor: Visitor):
+        if self.ty is not None:
+            self.ty.visit(visitor)
+    
+    def transform(self, visitor: Transformer) -> 'Var':
+        if self.ty is not None:
+            ty = visitor(self.ty)
+            assert isinstance(ty, Type)
+            return Var(self.name, ty)
         return self
 
 
@@ -177,49 +232,60 @@ class Program(AST):
         
 
 class TypeDef(AST):
-    def __init__(self, name: str, fields: list['VarExpr']):
+    def __init__(self, name: Symbol, ty: StructType):
         self.name = name
-        self.fields = fields
+        self.type = ty
 
     def doc(self, opt: DocOptions) -> Doc:
-        return Text(f'type {self.name} = ' + "{") + Lines([f.doc(opt) for f in self.fields]).indent() + Text("}")
+        return Text(f'type {self.name} = ') * self.type.doc(opt)
 
     def transform(self, visitor: Transformer) -> 'TypeDef':
-        fields = []
-        for f in self.fields:
-            x = visitor(f)
-            assert isinstance(x, VarExpr)
-            fields.append(x)
+        new_name = visitor(self.name)
+        assert isinstance(new_name, Symbol)
+        new_ty = visitor(self.type)
+        assert isinstance(new_ty, StructType)
+        return TypeDef(new_name, new_ty)
         
-        return TypeDef(self.name, fields)
-    
     def visit(self, visitor: Visitor):
-        for f in self.fields:
-            visitor(f)
+        visitor(self.name)
+        visitor(self.type)
 
 
 class FuncDecl(AST):
-    def __init__(self, name: str, args: list['VarExpr'], ret: TypeAlias):
-        assert isinstance(ret, TypeAlias)
+    def __init__(self, name: Symbol, args: list[Var], ret: Type):
+        assert isinstance(ret, Type)
         self.name = name
         self.args = args
         self.ret = ret
     
     def doc(self, opt: DocOptions) -> Doc:
+        def show_ty_doc(x: Var) -> Doc:
+            return x.doc(opt) * Text(': ') * x.ty.doc(opt) if x.ty is not None else x.doc(opt)
+
         return Text(f'fn {self.name}(') * \
-            join_doc([a.doc(opt) for a in self.args], ', ') * Text(f'): {self.ret}')
+            join_doc([show_ty_doc(a) for a in self.args], ', ') * Text(f'): {self.ret}')
         
     def transform(self, visitor: Transformer) -> 'FuncDecl':
-        return FuncDecl(self.name, [visitor(a) for a in self.args], visitor(self.ret))
+        new_name = visitor(self.name)
+        assert isinstance(new_name, Symbol)
+        args = []
+        for a in self.args:
+            x = visitor(a)
+            assert isinstance(x, Var)
+            args.append(x)
+        ret = visitor(self.ret)
+        assert isinstance(ret, Type)
+        return FuncDecl(new_name, args, ret)
     
     def visit(self, visitor: Visitor):
+        visitor(self.name)
         for a in self.args:
             visitor(a)
         visitor(self.ret)
 
 
 class FuncDef(AST):
-    def __init__(self, fn_decl: FuncDecl, body: list["Stmt"]):
+    def __init__(self, fn_decl: FuncDecl, body: list[AST]):
         self.fn_decl = fn_decl
         self.body = body
     
@@ -227,7 +293,9 @@ class FuncDef(AST):
         return (self.fn_decl.doc(opt) * Text(' {')) + Lines([b.doc(opt) for b in self.body]).indent() + Text('}')
     
     def transform(self, visitor: Transformer) -> 'FuncDef':
-        return FuncDef(visitor(self.fn_decl), [visitor(b) for b in self.body])
+        decl = visitor(self.fn_decl)
+        assert isinstance(decl, FuncDecl)
+        return FuncDef(decl, [visitor(b) for b in self.body])
 
     def visit(self, visitor: Visitor):
         visitor(self.fn_decl)
@@ -236,7 +304,7 @@ class FuncDef(AST):
 
 
 class ClassDef(AST):
-    def __init__(self, name: str, interface: str, body: list[AST]):
+    def __init__(self, name: Symbol, interface: Symbol, body: list[AST]):
         self.name = name
         self.interface = interface
         self.body = body
@@ -245,15 +313,27 @@ class ClassDef(AST):
         return Text(f'class {self.name} for {self.interface} ' + '{') + Lines([b.doc(opt) for b in self.body]).indent() + Text('}') 
     
     def transform(self, visitor: Transformer) -> 'ClassDef':
-        return ClassDef(self.name, self.interface, [visitor(b) for b in self.body])
+        new_name = visitor(self.name)
+        assert isinstance(new_name, Symbol)
+        new_interface = visitor(self.interface)
+        assert isinstance(new_interface, Symbol)
+        return ClassDef(new_name, new_interface, [visitor(b) for b in self.body])
     
     def visit(self, visitor: Visitor):
+        visitor(self.name)
+        visitor(self.interface)
         for b in self.body:
             visitor(b)
     
+    def get_method(self, name: str) -> Optional[FuncDef]:
+        for b in self.body:
+            if isinstance(b, FuncDef) and b.fn_decl.name == name:
+                return b
+        return None
+    
 
 class InterfaceDef(AST):
-    def __init__(self, name: str, body: list[AST]):
+    def __init__(self, name: Symbol, body: list[AST]):
         self.name = name
         self.body = body
     
@@ -261,23 +341,18 @@ class InterfaceDef(AST):
         return Text(f'interface {self.name} ' + '{') + Lines([b.doc(opt) for b in self.body]).indent() + Text('}')
     
     def transform(self, visitor: Transformer) -> 'InterfaceDef':
-        return InterfaceDef(self.name, [visitor(b) for b in self.body])
+        new_name = visitor(self.name)
+        assert isinstance(new_name, Symbol)
+        return InterfaceDef(new_name, [visitor(b) for b in self.body])
     
     def visit(self, visitor: Visitor):
+        visitor(self.name)
         for b in self.body:
             visitor(b)
 
 
-class Stmt(AST):
-    pass
-
-
-class Expr(AST):
-    pass
-
-
-class ExprStmt(Stmt):
-    def __init__(self, expr: Expr):
+class ExprStmt(AST):
+    def __init__(self, expr: AST):
         self.expr = expr
 
     def doc(self, opt: DocOptions) -> Doc:
@@ -290,24 +365,28 @@ class ExprStmt(Stmt):
         visitor(self.expr)
 
 
-class LetStmt(Stmt):
-    def __init__(self, value: 'VarExpr', expr: Expr):
+class LetStmt(AST):
+    def __init__(self, value: Var, expr: AST):
         self.value = value
         self.expr = expr
 
     def doc(self, opt: DocOptions) -> Doc:
-        return Text(f'let ') * self.value.doc(opt) * Text(' = ') * self.expr.doc(opt) * Text(';')
+        def show_ty_doc(x: Var) -> Doc:
+            return x.doc(opt) * Text(': ') * x.ty.doc(opt) if x.ty is not None else x.doc(opt)
+        return Text(f'let ') * show_ty_doc(self.value) * Text(' = ') * self.expr.doc(opt) * Text(';')
     
     def transform(self, visitor: Transformer) -> 'LetStmt':
-        return LetStmt(visitor(self.value), visitor(self.expr))
+        var = visitor(self.value)
+        assert isinstance(var, Var)
+        return LetStmt(var, visitor(self.expr))
     
     def visit(self, visitor: Visitor):
         visitor(self.value)
         visitor(self.expr)
 
 
-class ReturnStmt(Stmt):
-    def __init__(self, expr: Expr):
+class ReturnStmt(AST):
+    def __init__(self, expr: AST):
         self.expr = expr
     
     def doc(self, opt: DocOptions) -> Doc:
@@ -320,8 +399,8 @@ class ReturnStmt(Stmt):
         visitor(self.expr)        
 
 
-class GetAttrExpr(Expr):
-    def __init__(self, obj: Expr, attr: str):
+class GetAttrExpr(AST):
+    def __init__(self, obj: AST, attr: Symbol):
         self.obj = obj
         self.attr = attr
 
@@ -329,13 +408,18 @@ class GetAttrExpr(Expr):
         return self.obj.doc(opt) * Text(f'.{self.attr}')
 
     def transform(self, visitor: Transformer) -> 'GetAttrExpr':
-        return GetAttrExpr(visitor(self.obj), self.attr)
+        obj = visitor(self.obj)
+        attr = visitor(self.attr)
+        assert isinstance(attr, Symbol)
+
+        return GetAttrExpr(obj, attr)
     
     def visit(self, visitor: Visitor):
         visitor(self.obj)
+        visitor(self.attr)
 
-class CallExpr(Expr):
-    def __init__(self, fn: Expr, args: list[Expr]):
+class CallExpr(AST):
+    def __init__(self, fn: AST, args: list[AST]):
         self.fn = fn
         self.args = args
     
@@ -351,8 +435,30 @@ class CallExpr(Expr):
         for a in self.args:
             visitor(a)
 
+# class MethodCallExpr(AST):
+#     def __init__(self, obj: AST, method: Symbol, args: list[AST]):
+#         self.obj = obj
+#         self.method = method
+#         self.args = args
+    
+#     def doc(self, opt: DocOptions) -> Doc:
+#         inner = [a.doc(opt) for a in self.args]
+#         return self.obj.doc(opt) * Text('.') * self.method.doc(opt) * Text('(') * Concat(inner) * Text(')')
+    
+#     def transform(self, visitor: Transformer) -> 'MethodCallExpr':
+#         return MethodCallExpr(
+#             visitor(self.obj), 
+#             visitor(self.method), 
+#             [visitor(a) for a in self.args]
+#         )
+    
+#     def visit(self, visitor: Visitor):
+#         visitor(self.obj)
+#         visitor(self.method)
+#         for a in self.args:
+#             visitor(a)
 
-class IntExpr(Expr):
+class IntExpr(AST):
     def __init__(self, value: int):
         self.value = value
 
@@ -368,32 +474,8 @@ class IntExpr(Expr):
     def visit(self, visitor: Visitor):
         pass
 
-
-class VarExpr(Expr):
-    def __init__(self, name: str, ty: Optional[TypeAlias] = None, parent: Optional[Expr] = None):
-        self.name = name
-        self.ty = ty
-        self.parent = parent
-
-    def doc(self, opt: DocOptions) -> Doc:
-        show_ty = lambda x: x * Text(': ') * self.ty.doc(opt) if self.ty is not None else x * Text(': ?')
-        if opt.show_link:
-            if self.parent is None:
-                return show_ty(Text(f'(?{self.name})'))
-        return show_ty(Text(self.name))
-    
-    def transform(self, visitor: Transformer) -> 'VarExpr':
-        return VarExpr(self.name, visitor(self.ty) if self.ty is not None else None, visitor(self.parent) if self.parent is not None else None)
-
-    def visit(self, visitor: Visitor):
-        if self.ty is not None:
-            visitor(self.ty)
-        if self.parent is not None:
-            visitor(self.parent)
-
-
-class BinOpExpr(Expr):
-    def __init__(self, op: str, lhs: Expr, rhs: Expr):
+class BinOpExpr(AST):
+    def __init__(self, op: str, lhs: AST, rhs: AST):
         self.op = op
         self.lhs = lhs
         self.rhs = rhs
@@ -408,9 +490,8 @@ class BinOpExpr(Expr):
         visitor(self.lhs)
         visitor(self.rhs)
 
-
-class ConstructorExpr(Expr):
-    def __init__(self, args: list[tuple[str, Expr]]):
+class ConstructorExpr(AST):
+    def __init__(self, args: list[tuple[str, AST]]):
         self.args = args
 
     def __str__(self):
@@ -428,7 +509,6 @@ class ConstructorExpr(Expr):
         for name, expr in self.args:
             visitor(expr)
 
-
 class ParseTree:
     def visit(self, node: Tree) -> AST:
         method_name = f'visit_{str(node.data)}'
@@ -438,61 +518,62 @@ class ParseTree:
         else:
             raise NotImplementedError(f'visit_{str(node.data)} not implemented')
     
+    type_dispatch = {
+        'i32': i32,
+        'this_t': this_t,
+        'self_t': self_t,
+        '()': void_t
+    }
     @staticmethod
-    def visit_type(t: Tree) -> TypeAlias:
+    def visit_type(t: Tree) -> Type:
         # print(type(t), t)
         if isinstance(t, Tree) and t.data == 'custom_type':
-            return TypeAlias(str(t.children[0]))
+            return SymbolType(Symbol(str(t.children[0])))
         s = t.data if isinstance(t, Tree) else str(t)
-        if s == 'This':
-            return TypeAlias("This")
-        elif s == 'Self':
-            return TypeAlias("Self")
-        elif s == 'i32':
-            return TypeAlias(i32)
-        elif s == '()':
-            return TypeAlias(void_t)
-        else:
-            raise NotImplementedError(f'{s} not implemented')
+        if s in ParseTree.type_dispatch:
+            return ParseTree.type_dispatch[s]
+        raise NotImplementedError(f'Unknown type {s}')
 
-    def visit_arg(self, node: Tree) -> VarExpr:
+    def visit_arg(self, node: Tree) -> Var:
         if str(node.data) == 'this_arg':
-            return VarExpr("this", TypeAlias("This"))
+            return Var("this", this_t, VarKind.THIS)
         name = str(node.children[0])
         ty = ParseTree.visit_type(node.children[1])
-        var = VarExpr(name, ty)
+        var = Var(name, ty)
         return var
     
-    def visit_var(self, node: Tree) -> VarExpr:
+    def visit_var(self, node: Tree) -> Var:
         name = str(node.children[0])
-        return VarExpr(name)
+        return Var(name)
     
     def visit_number(self, node: Tree) -> IntExpr:
         return IntExpr(int(str(node.children[0])))
 
-    def visit_self(self, node: Tree) -> VarExpr:
-        return VarExpr("self", TypeAlias("Self"))
+    def visit_self(self, node: Tree) -> Var:
+        return Var("self", self_t, VarKind.SELF) # technically self refers to the class, thus not a type
     
-    def visit_this(self, node: Tree) -> VarExpr:
-        return VarExpr("this", TypeAlias("This"))
+    def visit_this(self, node: Tree) -> Var:
+        return Var("this", this_t, VarKind.THIS)
 
     def visit_function_decl(self, node: Tree) -> FuncDecl:
         children = node.children
-        name = str(children[0])
-        args = [self.visit_arg(c) for c in children[1:-1] if len(c.children) > 0]
-        ret_ty = ParseTree.visit_type((children[-1])) if children[-1] is not None else TypeAlias(void_t)
+        name = Symbol(str(children[0]))
+        args = []
+        for c in children[1:-1]:
+            if len(c.children) > 0 or c.data == 'this_arg':
+                args.append(self.visit_arg(c))
+        ret_ty = ParseTree.visit_type((children[-1])) if children[-1] is not None else void_t
         return FuncDecl(name, args, ret_ty)
 
     def visit_function_def(self, node: Tree) -> FuncDef:
         children = node.children
         decl = self.visit_function_decl(children[0])
         body = [self.visit(c) for c in children[1:]]
-        assert all(isinstance(b, Stmt) for b in body), body
-        return FuncDef(decl, cast(list[Stmt], body))
+        assert all(isinstance(b, AST) for b in body), body
+        return FuncDef(decl, cast(list[AST], body))
     
     def visit_expr_stmt(self, node: Tree) -> ExprStmt:
         expr = self.visit(node.children[0])
-        assert isinstance(expr, Expr)
         return ExprStmt(expr)
     
     def visit_let_stmt(self, node: Tree) -> LetStmt:
@@ -500,32 +581,26 @@ class ParseTree:
         if isinstance(children[0], Tree):
             var = self.visit_arg(children[0])
         else:
-            var = VarExpr(str(children[0]))
+            var = Var(str(children[0]))
         
         expr = self.visit(children[1])
-        assert isinstance(expr, Expr)
         return LetStmt(var, expr)
     
     def visit_return_stmt(self, node: Tree) -> ReturnStmt:
         expr = self.visit(node.children[0])
-        assert isinstance(expr, Expr)
         return ReturnStmt(expr)
     
     def visit_bin_op_expr(self, node: Tree) -> BinOpExpr:
         children = node.children
         lhs = self.visit(children[0])
-        assert isinstance(lhs, Expr)
         rhs = self.visit(children[2])
-        assert isinstance(rhs, Expr)
         return BinOpExpr(str(children[1].data), lhs, rhs)
     
     def visit_call_expr(self, node: Tree) -> CallExpr:
         children = node.children
         fn = self.visit(children[0])
-        assert isinstance(fn, Expr)
         args = [self.visit(c) for c in children[1:] if c.data != 'expr']
-        assert all(isinstance(a, Expr) for a in args)
-        return CallExpr(fn, cast(list[Expr], args))
+        return CallExpr(fn, args)
 
     def visit_constructor_expr(self, node: Tree) -> ConstructorExpr:
         children = node.children
@@ -533,41 +608,280 @@ class ParseTree:
         for i in range(0, len(children), 2):
             name = str(children[i])
             expr = self.visit(children[i+1])
-            assert isinstance(expr, Expr)
             args.append((name, expr))
         return ConstructorExpr(args)
     
     def visit_get_attr(self, node: Tree) -> GetAttrExpr:
         children = node.children
         obj = self.visit(children[0])
-        assert isinstance(obj, Expr)
         attr = str(children[1])
-        return GetAttrExpr(obj, attr)
+        return GetAttrExpr(obj, Symbol(attr))
     
     def visit_class_def(self, node: Tree) -> ClassDef:
         children = node.children
-        name = str(children[0])
-        cfor = str(children[1])
+        name = Symbol(str(children[0]))
+        cfor = Symbol(str(children[1]))
         body = [self.visit(c) for c in children[2:]]
         return ClassDef(name, cfor, body)
     
     def visit_interface_def(self, node: Tree) -> InterfaceDef:
         children = node.children
-        name = str(children[0])
+        name = Symbol(str(children[0]))
         body = [self.visit(c) for c in children[1:]]
         return InterfaceDef(name, body)
 
     def visit_typedef(self, node: Tree) -> TypeDef:
         children = node.children
         name = str(children[0])
-        fields = [self.visit(c) for c in children[1:]]
-        assert all(isinstance(f, VarExpr) for f in fields)
-        return TypeDef(name, cast(list[VarExpr], fields))
+        new_fields = {}
+        for f in [self.visit(c) for c in children[1:]]:
+            assert isinstance(f, Var)
+            assert f.ty is not None
+            new_fields[f.name] = f.ty
+        return TypeDef(Symbol(name), StructType(new_fields))
     
     def visit_program(self, node: Tree) -> Program:
         assert node.data == 'program'
         children = node.children
         return Program([self.visit(c) for c in children])
+
+
+class CanonicalClassDefn(AST):
+    def __init__(self, 
+                 name: Symbol, 
+                 interface: Symbol, 
+                 funcs: Dict[Symbol, FuncDef],
+                 repr_type: StructType):
+        self.name = name
+        self.interface = interface
+        self.funcs = funcs
+        self.repr_type = repr_type
+
+    def doc(self, opt: DocOptions) -> Doc:
+        return Text(f'class {self.name} for {self.interface}(') * self.repr_type.doc(opt) * Text(') {') +\
+            Lines([self.funcs[f].doc(opt) for f in self.funcs]).indent() +\
+            Text('}')
+
+    def transform(self, visitor: Transformer) -> AST:
+        new_funcs = {}
+        for f, func in self.funcs.items():
+            new_func = visitor(func)
+            assert isinstance(new_func, FuncDef)
+            new_funcs[f] = new_func
+        new_repr_type = visitor(self.repr_type)
+        assert isinstance(new_repr_type, StructType)
+        return CanonicalClassDefn(self.name, self.interface, new_funcs, new_repr_type)
+    
+    def visit(self, visitor: Visitor):
+        for f in self.funcs.values():
+            f.visit(visitor)
+        self.repr_type.visit(visitor)
+
+class CanonicalizeClass(Transformer):
+    def visit_ClassDef(self, node: ClassDef) -> CanonicalClassDefn:
+        funcs = {}
+        repr_type = None
+        for b in node.body:
+            if isinstance(b, FuncDef):
+                funcs[b.fn_decl.name] = b
+            elif isinstance(b, TypeDef) and b.name == Symbol('This'):
+                repr_type = b.type
+                # print(repr_type)
+            else: # TODO: associated types
+                raise NotImplementedError(f'Unknown class body {b}')
+        assert repr_type is not None
+        return CanonicalClassDefn(node.name, node.interface, funcs, repr_type)
+
+class CanonicalItfDefn(AST):
+    def __init__(self, name: Symbol, funcs: Dict[Symbol, FuncDecl]):
+        self.name = name
+        self.funcs = funcs
+    
+    def doc(self, opt: DocOptions) -> Doc:
+        return Text(f'interface {self.name} ' + '{') +\
+            Lines([self.funcs[f].doc(opt) for f in self.funcs]).indent() +\
+            Text('}')
+    
+    def transform(self, visitor: Transformer) -> AST:
+        new_funcs = {}
+        for f, func in self.funcs.items():
+            new_func = visitor(func)
+            assert isinstance(new_func, FuncDecl)
+            new_funcs[f] = new_func
+        return CanonicalItfDefn(self.name, new_funcs)
+
+    def visit(self, visitor: Visitor):
+        for f in self.funcs.values():
+            f.visit(visitor)
+
+class CanonicalizeItf(Transformer):
+    def visit_InterfaceDef(self, node: InterfaceDef) -> CanonicalItfDefn:
+        funcs = {}
+        for b in node.body:
+            if isinstance(b, FuncDecl):
+                funcs[b.name] = b
+        return CanonicalItfDefn(node.name, funcs)
+
+class ScopedTransformer(Transformer):
+    def __init__(self, memo=False) -> None:
+        super().__init__(memo)
+        self.scope: List[Union[CanonicalClassDefn, CanonicalItfDefn, Program]] = []
+    
+    def lookup_name(self, name: Symbol, idx=-1) -> Optional[AST]:
+        if isinstance(self.scope[idx], Program):
+            for b in self.scope[idx].body:
+                if isinstance(b, TypeDef) and b.name == name:
+                    return b
+                elif isinstance(b, FuncDef) and b.fn_decl.name == name:
+                    return b
+                elif isinstance(b, CanonicalClassDefn) and b.name == name:
+                    return b
+                elif isinstance(b, CanonicalItfDefn) and b.name == name:
+                    return b
+        elif isinstance(self.scope[idx], CanonicalClassDefn):
+            if name in self.scope[idx].funcs:
+                return self.scope[idx].funcs[name]
+            return self.lookup_name(name, idx-1)
+        elif isinstance(self.scope[idx], CanonicalItfDefn):
+            if name in self.scope[idx].funcs:
+                return self.scope[idx].funcs[name]
+            return self.lookup_name(name, idx-1)
+        return None
+    
+    def __call__(self, node: AST) -> AST:
+        if isinstance(node, (CanonicalClassDefn, CanonicalItfDefn, Program)):
+            self.scope.append(node)
+            new_node = super().__call__(node)
+            self.scope.pop()
+        else:
+            new_node = super().__call__(node)
+        return new_node
+
+class ScopedVisitor(Visitor):
+    def __init__(self) -> None:
+        self.scope: List[Union[CanonicalClassDefn, CanonicalItfDefn, Program]] = []
+    
+    def lookup_name(
+        self, 
+        node: Union[CanonicalClassDefn, CanonicalItfDefn, Program],
+        name: str
+    ) -> Optional[AST]:
+        if isinstance(node, Program):
+            for b in node.body:
+                if isinstance(b, TypeDef) and b.name == name:
+                    return b
+                elif isinstance(b, FuncDef) and b.fn_decl.name == name:
+                    return b
+                elif isinstance(b, CanonicalClassDefn) and b.name == name:
+                    return b
+                elif isinstance(b, CanonicalItfDefn) and b.name == name:
+                    return b
+        elif isinstance(node, CanonicalClassDefn):
+            if name in node.funcs:
+                return node.funcs[name]
+        elif isinstance(node, CanonicalItfDefn):
+            if name in node.funcs:
+                return node.funcs[name]
+        return None
+    
+    def lookup_path(self, path: Tuple[str, ...], idx=0) -> Optional[AST]:
+        node = self.scope[idx]
+        for p in path:
+            l = self.lookup_name(node, p)
+            if l is None:
+                return None
+            node = l
+        return node
+
+    def __call__(self, node: AST):
+        if isinstance(node, (CanonicalClassDefn, CanonicalItfDefn, Program)):
+            self.scope.append(node)
+            super().__call__(node)
+            self.scope.pop()
+        else:
+            super().__call__(node)
+
+class ResolveSymbolAndVars(ScopedTransformer):
+    def __init__(self) -> None:
+        super().__init__(memo=False)
+        self.vars: Dict[str, Var] = {}
+    
+    def visit_This(self, node: This) -> AST:
+        assert isinstance(self.scope[-1], (CanonicalClassDefn, CanonicalItfDefn))
+        if isinstance(self.scope[-1], CanonicalClassDefn):
+            return self.scope[-1].repr_type
+        # raise RuntimeError("Unable to get This from", self.scope[-1])
+        return node
+    
+    def visit_Self(self, node: Self) -> AST:
+        assert isinstance(self.scope[-1], (CanonicalClassDefn, CanonicalItfDefn))
+        if isinstance(self.scope[-1], CanonicalClassDefn):
+            return SymbolType(self.scope[-1].interface)
+        return SymbolType(self.scope[-1].name)
+    
+    def visit_Var(self, node: Var) -> AST:
+        if node.name == 'print':
+            return Symbol('print')
+        if node.name in self.vars:
+            return self.vars[node.name]
+        lookup = self.lookup_name(Symbol(node.name))
+        if isinstance(lookup, (FuncDef, TypeDef, CanonicalClassDefn, CanonicalItfDefn)):
+            return Symbol(node.name)
+        raise RuntimeError(f'Unknown variable {node.name}')
+    
+    def visit_LetStmt(self, node: LetStmt) -> AST:
+        self.vars[node.value.name] = node.value
+        return node.transform(self)
+    
+    def visit_FuncDef(self, node: FuncDef) -> AST:
+        return node.transform(self)
+    
+    def visit_FuncDecl(self, node: FuncDecl) -> AST:
+        self.vars = {}
+        for v in node.args:
+            ty = self(v.ty)
+            # print(ty, type(self.scope[-1]))
+            assert isinstance(ty, Type)
+            v.ty = ty
+            self.vars[v.name] = v
+
+        new_decl = node.transform(self)
+        return new_decl
+
+    def visit_GetAttrExpr(self, node: GetAttrExpr) -> AST:
+        obj = self(node.obj)
+        if isinstance(obj, Symbol):
+            return Symbol(obj.names + (node.attr.names[0],))
+        return GetAttrExpr(obj, node.attr)
+
+class TypeInfer(ScopedVisitor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.tys: Dict[int, Type] = {}
+    
+    def visit_Var(self, node: Var) -> None:
+        assert node.ty is not None
+        self.tys[id(node)] = node.ty
+    
+    def visit_CallExpr(self, node: CallExpr) -> None:
+        node.visit(self)
+        if isinstance(node.fn, Symbol):
+            if node.fn.names == ('print',):
+                assert len(node.args) == 1
+                self.tys[id(node)] = void_t
+                return
+            lookup = self.lookup_name(self.scope[-1], node.fn.names)
+            assert isinstance(lookup, FuncDef)
+            assert len(lookup.fn_decl.args) == len(node.args)
+            assert all(a.ty == self.tys[id(b)] for a, b in zip(lookup.fn_decl.args, node.args))
+            self.tys[id(node)] = lookup.fn_decl.ret
+        elif isinstance(node.fn, GetAttrExpr) and id(node.fn.obj) in self.tys:
+            obj_ty = self.tys[id(node.fn.obj)]
+            if isinstance(obj_ty, SymbolType):
+                assert False
+
+        raise NotImplementedError(f'Unknown function call {node.fn}')
+    
 
 with open("grammar.lark", 'r') as f:
     grammar = f.read()
@@ -576,65 +890,16 @@ parser = Lark(grammar, start='program', parser='earley')
 with open('examples/basic.fm', 'r') as f:
     tree = parser.parse(f.read())
 
-class PrintVars(Visitor):
-    def visit_VarExpr(self, node: VarExpr):
-        print(node.name)
-
 # print(tree.pretty())
 v = ParseTree()
 ast = v.visit(tree)
 # print(ast)
+# print(ast.doc(DocOptions(show_link=True)).to_str(0))
+ast = CanonicalizeClass()(ast)
+# print(ast.doc(DocOptions(show_link=True)).to_str(0))
+ast = CanonicalizeItf()(ast)
+# print(ast.doc(DocOptions(show_link=True)).to_str(0))
+
+ast = ResolveSymbolAndVars()(ast)
 print(ast.doc(DocOptions(show_link=True)).to_str(0))
-
-
-class GetDefn(Visitor):
-    def __init__(self):
-        self.class_defn: Dict[str, ClassDef] = {}
-        self.inf_defn: Dict[str, InterfaceDef] = {}
-        self.func_defn: Dict[str, FuncDef] = {}
-        self.type_defn: Dict[str, TypeDef] = {}
-
-    def visit_ClassDef(self, node: ClassDef):
-        self.class_defn[node.name] = node
-    
-    def visit_InterfaceDef(self, node: InterfaceDef):
-        self.inf_defn[node.name] = node
-    
-    def visit_FuncDef(self, node: FuncDef):
-        self.func_defn[node.fn_decl.name] = node
-    
-    def visit_TypeDef(self, node: TypeDef):
-        self.type_defn[node.name] = node
-
-class UpdateDefn(Transformer):
-    def __init__(self, defn: GetDefn):
-        super().__init__()
-        self.defn = defn
-        self.var_scope: List[Dict[str, VarExpr]] = []
-        self.parent: List[AST] = []
-    
-    def visit(self, node: AST) -> AST:
-        self.parent.append(node)
-        ast = node.visit(self)
-        self.parent.pop()
-        return ast
-    
-    def visit_FuncDef(self, node: FuncDef) -> FuncDef:
-        fn_decl = node.transform(self)
-        assert isinstance(fn_decl, FuncDecl)
-        self.var_scope.append({a.name: a for a in fn_decl.args})
-        body = [b.transform(self) for b in node.body]
-        self.var_scope.pop()
-        return FuncDef(fn_decl, body)
-    
-    def visit_VarExpr(self, node: VarExpr):
-        par = self.parent[-1]
-        # note to self: CallExpr
-        assert isinstance(par, (FuncDecl, LetStmt))
-        ty = node.ty.transform(self) if node.ty is not None else None
-        new_node = VarExpr(node.name, ty, par)
-        return new_node
-
-    def visit_TypeAlias(self, node: TypeAlias):
-        return TypeAlias(self.defn.type_defn[node.type.name])
 

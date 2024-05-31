@@ -26,6 +26,7 @@ fn foo2(a: Bar, b: Baz): i32 {
 
 interface I1 {
     fn hello(this)
+    fn hello1(this, other: Self)
 }
 
 class c1 for I1 {
@@ -41,9 +42,14 @@ class c1 for I1 {
         print(this.a);
     }
 
+    fn hello1(this, other: Self) {
+        print(this.a);
+        other.hello();
+    }
+
     fn hello2(this) {
-        self.hello();
-        self.hello();
+        this.hello();
+        this.hello();
     }
 }
 
