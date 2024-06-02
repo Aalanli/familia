@@ -21,7 +21,7 @@ type Baz = {
 }
 
 fn foo2(a: Bar, b: Baz): i32 {
-    return (a.b + a.b.c);
+    return (a.b + b.a.a);
 }
 
 interface I1 {

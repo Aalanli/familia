@@ -106,24 +106,43 @@ class AST:
         raise NotImplementedError()
 
 class Symbol(AST):
-    def __init__(self, names: Union[str, Tuple[str, ...]]):
-        self.names: Tuple[str, ...] = (names,) if isinstance(names, str) else names
+    def __init__(self, name: str):
+        self.name = name
 
     def doc(self, opt: DocOptions) -> Doc:
-        return Text('@' + '::'.join(self.names))
+        return Text('@' + self.name)
     
     def __hash__(self) -> int:
-        return hash(self.names)
+        return hash(self.name)
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, Symbol) and self.names == other.names
+        return isinstance(other, Symbol) and self.name == other.name
     
     def visit(self, visitor: Visitor):
         pass
 
     def transform(self, visitor: Transformer) -> 'Symbol':
         return self
+
+class Path(AST):
+    def __init__(self, path: Tuple[Symbol,...]) -> None:
+        self.path = path
     
+    def doc(self, opt: DocOptions) -> Doc:
+        return Text('@' + '::'.join(map(lambda x: x.name, self.path)))
+    
+    def __hash__(self) -> int:
+        return hash(self.path)
+    
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Path) and self.path == other.path
+    
+    def visit(self, visitor: Visitor):
+        pass
+
+    def transform(self, visitor: Transformer) -> 'Path':
+        return self
+
 
 class Type(AST):
     def __hash__(self) -> int:
@@ -194,7 +213,7 @@ class VarKind(Enum):
     LOCAL = 2
 
 class Var(AST):
-    def __init__(self, name: str, ty: Optional[Type] = None, kind = VarKind.LOCAL):
+    def __init__(self, name: str, kind: VarKind, ty: Optional[Type] = None):
         self.name = name
         self.ty = ty
         self.kind = kind
@@ -212,7 +231,7 @@ class Var(AST):
         if self.ty is not None:
             ty = visitor(self.ty)
             assert isinstance(ty, Type)
-            return Var(self.name, ty)
+            return Var(self.name, self.kind, ty)
         return self
 
 
@@ -536,24 +555,24 @@ class ParseTree:
 
     def visit_arg(self, node: Tree) -> Var:
         if str(node.data) == 'this_arg':
-            return Var("this", this_t, VarKind.THIS)
+            return Var("this", VarKind.THIS, this_t)
         name = str(node.children[0])
         ty = ParseTree.visit_type(node.children[1])
-        var = Var(name, ty)
+        var = Var(name, VarKind.LOCAL, ty)
         return var
     
     def visit_var(self, node: Tree) -> Var:
         name = str(node.children[0])
-        return Var(name)
+        return Var(name, VarKind.LOCAL)
     
     def visit_number(self, node: Tree) -> IntExpr:
         return IntExpr(int(str(node.children[0])))
 
     def visit_self(self, node: Tree) -> Var:
-        return Var("self", self_t, VarKind.SELF) # technically self refers to the class, thus not a type
+        return Var("self", VarKind.SELF, self_t) # technically self refers to the class, thus not a type
     
     def visit_this(self, node: Tree) -> Var:
-        return Var("this", this_t, VarKind.THIS)
+        return Var("this", VarKind.THIS, this_t)
 
     def visit_function_decl(self, node: Tree) -> FuncDecl:
         children = node.children
@@ -581,7 +600,7 @@ class ParseTree:
         if isinstance(children[0], Tree):
             var = self.visit_arg(children[0])
         else:
-            var = Var(str(children[0]))
+            var = Var(str(children[0]), VarKind.LOCAL)
         
         expr = self.visit(children[1])
         return LetStmt(var, expr)
@@ -722,22 +741,97 @@ class CanonicalizeItf(Transformer):
                 funcs[b.name] = b
         return CanonicalItfDefn(node.name, funcs)
 
+class CanonicalProgram(AST):
+    def __init__(
+            self, 
+            interfaces: Dict[Symbol, CanonicalItfDefn], 
+            type_defs: Dict[Symbol, TypeDef],
+            classes: Dict[Symbol, CanonicalClassDefn],
+            functions: Dict[Symbol, FuncDef]
+        ):
+        self.interfaces = interfaces
+        self.classes = classes
+        self.functions = functions
+        self.type_defs = type_defs
+    
+    def doc(self, opt: DocOptions) -> Doc:
+        return Lines([
+            Lines([i.doc(opt) for i in self.interfaces.values()]),
+            Lines([t.doc(opt) for t in self.type_defs.values()]),
+            Lines([c.doc(opt) for c in self.classes.values()]),
+            Lines([f.doc(opt) for f in self.functions.values()])
+        ])
+    
+    def transform(self, visitor: Transformer) -> AST:
+        new_interfaces = {}
+        for i, itf in self.interfaces.items():
+            new_itf = visitor(itf)
+            assert isinstance(new_itf, CanonicalItfDefn)
+            new_interfaces[i] = new_itf
+        new_classes = {}
+        for c, cls in self.classes.items():
+            new_cls = visitor(cls)
+            assert isinstance(new_cls, CanonicalClassDefn)
+            new_classes[c] = new_cls
+        new_functions = {}
+        for f, func in self.functions.items():
+            new_func = visitor(func)
+            assert isinstance(new_func, FuncDef)
+            new_functions[f] = new_func
+        new_type_defs = {}
+        for t, ty in self.type_defs.items():
+            new_ty = visitor(ty)
+            assert isinstance(new_ty, TypeDef)
+            new_type_defs[t] = new_ty
+        return CanonicalProgram(new_interfaces, new_type_defs, new_classes, new_functions)
+    
+    def visit(self, visitor: Visitor):
+        for i in self.interfaces.values():
+            visitor(i)
+        for c in self.classes.values():
+            visitor(c)
+        for f in self.functions.values():
+            visitor(f)
+        for t in self.type_defs.values():
+            visitor(t)
+
+class CanonicalizeProgram(Transformer):
+    def visit_Program(self, node: Program) -> CanonicalProgram:
+        interfaces = {}
+        classes = {}
+        functions = {}
+        type_defs = {}
+        for b in node.body:
+            if isinstance(b, CanonicalItfDefn):
+                itf = b
+                interfaces[itf.name] = itf
+            elif isinstance(b, CanonicalClassDefn):
+                cls = b
+                classes[cls.name] = cls
+            elif isinstance(b, FuncDef):
+                functions[b.fn_decl.name] = b
+            elif isinstance(b, TypeDef):
+                type_defs[b.name] = b
+            else:
+                raise NotImplementedError(f'Unknown body {b}')
+        return CanonicalProgram(interfaces, type_defs, classes, functions)
+
 class ScopedTransformer(Transformer):
     def __init__(self, memo=False) -> None:
         super().__init__(memo)
-        self.scope: List[Union[CanonicalClassDefn, CanonicalItfDefn, Program]] = []
+        self.scope: List[Union[CanonicalClassDefn, CanonicalItfDefn, CanonicalProgram]] = []
     
     def lookup_name(self, name: Symbol, idx=-1) -> Optional[AST]:
-        if isinstance(self.scope[idx], Program):
-            for b in self.scope[idx].body:
-                if isinstance(b, TypeDef) and b.name == name:
-                    return b
-                elif isinstance(b, FuncDef) and b.fn_decl.name == name:
-                    return b
-                elif isinstance(b, CanonicalClassDefn) and b.name == name:
-                    return b
-                elif isinstance(b, CanonicalItfDefn) and b.name == name:
-                    return b
+        prog = self.scope[idx]
+        if isinstance(prog, CanonicalProgram):
+            if name in prog.interfaces:
+                return prog.interfaces[name]
+            if name in prog.classes:
+                return prog.classes[name]
+            if name in prog.functions:
+                return prog.functions[name]
+            if name in prog.type_defs:
+                return prog.type_defs[name]
         elif isinstance(self.scope[idx], CanonicalClassDefn):
             if name in self.scope[idx].funcs:
                 return self.scope[idx].funcs[name]
@@ -749,7 +843,7 @@ class ScopedTransformer(Transformer):
         return None
     
     def __call__(self, node: AST) -> AST:
-        if isinstance(node, (CanonicalClassDefn, CanonicalItfDefn, Program)):
+        if isinstance(node, (CanonicalClassDefn, CanonicalItfDefn, CanonicalProgram)):
             self.scope.append(node)
             new_node = super().__call__(node)
             self.scope.pop()
@@ -759,23 +853,22 @@ class ScopedTransformer(Transformer):
 
 class ScopedVisitor(Visitor):
     def __init__(self) -> None:
-        self.scope: List[Union[CanonicalClassDefn, CanonicalItfDefn, Program]] = []
+        self.scope: List[Union[CanonicalClassDefn, CanonicalItfDefn, CanonicalProgram]] = []
     
     def lookup_name(
         self, 
-        node: Union[CanonicalClassDefn, CanonicalItfDefn, Program],
-        name: str
+        node: Union[CanonicalClassDefn, CanonicalItfDefn, CanonicalProgram],
+        name: Symbol
     ) -> Optional[AST]:
-        if isinstance(node, Program):
-            for b in node.body:
-                if isinstance(b, TypeDef) and b.name == name:
-                    return b
-                elif isinstance(b, FuncDef) and b.fn_decl.name == name:
-                    return b
-                elif isinstance(b, CanonicalClassDefn) and b.name == name:
-                    return b
-                elif isinstance(b, CanonicalItfDefn) and b.name == name:
-                    return b
+        if isinstance(node, CanonicalProgram):
+            if name in node.interfaces:
+                return node.interfaces[name]
+            if name in node.classes:
+                return node.classes[name]
+            if name in node.functions:
+                return node.functions[name]
+            if name in node.type_defs:
+                return node.type_defs[name]
         elif isinstance(node, CanonicalClassDefn):
             if name in node.funcs:
                 return node.funcs[name]
@@ -784,9 +877,9 @@ class ScopedVisitor(Visitor):
                 return node.funcs[name]
         return None
     
-    def lookup_path(self, path: Tuple[str, ...], idx=0) -> Optional[AST]:
+    def lookup_path(self, path: Path, idx=0) -> Optional[AST]:
         node = self.scope[idx]
-        for p in path:
+        for p in path.path:
             l = self.lookup_name(node, p)
             if l is None:
                 return None
@@ -794,7 +887,7 @@ class ScopedVisitor(Visitor):
         return node
 
     def __call__(self, node: AST):
-        if isinstance(node, (CanonicalClassDefn, CanonicalItfDefn, Program)):
+        if isinstance(node, (CanonicalClassDefn, CanonicalItfDefn, CanonicalProgram)):
             self.scope.append(node)
             super().__call__(node)
             self.scope.pop()
@@ -839,6 +932,7 @@ class ResolveSymbolAndVars(ScopedTransformer):
     def visit_FuncDecl(self, node: FuncDecl) -> AST:
         self.vars = {}
         for v in node.args:
+            assert v.ty is not None
             ty = self(v.ty)
             # print(ty, type(self.scope[-1]))
             assert isinstance(ty, Type)
@@ -851,7 +945,7 @@ class ResolveSymbolAndVars(ScopedTransformer):
     def visit_GetAttrExpr(self, node: GetAttrExpr) -> AST:
         obj = self(node.obj)
         if isinstance(obj, Symbol):
-            return Symbol(obj.names + (node.attr.names[0],))
+            return Path((obj, node.attr))
         return GetAttrExpr(obj, node.attr)
 
 class TypeInfer(ScopedVisitor):
@@ -863,25 +957,106 @@ class TypeInfer(ScopedVisitor):
         assert node.ty is not None
         self.tys[id(node)] = node.ty
     
-    def visit_CallExpr(self, node: CallExpr) -> None:
+    def visit_IntExpr(self, node: IntExpr) -> None:
+        self.tys[id(node)] = i32
+    
+    def visit_BinOpExpr(self, node: BinOpExpr) -> None:
         node.visit(self)
+        assert id(node.lhs) in self.tys, f'{node.lhs} not in tys'
+        assert id(node.rhs) in self.tys, f'{node.rhs} not in tys'
+        assert self.tys[id(node.lhs)] == i32
+        assert self.tys[id(node.rhs)] == i32
+        self.tys[id(node)] = i32
+    
+    def visit_ConstructorExpr(self, node: ConstructorExpr) -> None:
+        node.visit(self)
+        self.tys[id(node)] = StructType({name: self.tys[id(expr)] for name, expr in node.args})
+    
+    def visit_GetAttrExpr(self, node: GetAttrExpr) -> None:
+        node.visit(self)
+        assert id(node.obj) in self.tys, f'{node.obj} not in tys'
+        base_ty = self.tys[id(node.obj)]
+        if isinstance(base_ty, SymbolType):
+            lookup = self.lookup_name(self.scope[0], base_ty.symbol)
+            assert isinstance(lookup, TypeDef)
+            ty = lookup.type
+            assert node.attr.name in ty.fields, f'{node.attr.name} not in {ty}'
+            self.tys[id(node)] = ty.fields[node.attr.name]
+        elif isinstance(base_ty, StructType):
+            assert node.attr.name in base_ty.fields, f'{node.attr.name} not in {base_ty}'
+            self.tys[id(node)] = base_ty.fields[node.attr.name]
+        else:
+            raise NotImplementedError(f'Unknown base type {base_ty}')
+        # other case is interfaces, handled in CallExpr
+
+    def visit_CallExpr(self, node: CallExpr) -> None:
+        if isinstance(node.fn, GetAttrExpr):
+            self(node.fn.obj)
+        else:
+            node.visit(self)
+
+        def handle_function(fn: FuncDecl, args: List[Type]):
+            assert len(fn.args) == len(args)
+            assert all(a.ty == b for a, b in zip(fn.args, args)), f'{[t.ty for t in fn.args]} != {args}'
+            self.tys[id(node)] = fn.ret
+        
         if isinstance(node.fn, Symbol):
-            if node.fn.names == ('print',):
+            if node.fn.name == 'print':
                 assert len(node.args) == 1
                 self.tys[id(node)] = void_t
                 return
-            lookup = self.lookup_name(self.scope[-1], node.fn.names)
-            assert isinstance(lookup, FuncDef)
-            assert len(lookup.fn_decl.args) == len(node.args)
-            assert all(a.ty == self.tys[id(b)] for a, b in zip(lookup.fn_decl.args, node.args))
-            self.tys[id(node)] = lookup.fn_decl.ret
-        elif isinstance(node.fn, GetAttrExpr) and id(node.fn.obj) in self.tys:
-            obj_ty = self.tys[id(node.fn.obj)]
-            if isinstance(obj_ty, SymbolType):
-                assert False
-
-        raise NotImplementedError(f'Unknown function call {node.fn}')
+            # lol, this could be much better
+            # TODO: error check name resolution
+            lookup = self.lookup_name(self.scope[0], node.fn)
+            if isinstance(lookup, FuncDef):
+                handle_function(lookup.fn_decl, [self.tys[id(a)] for a in node.args])
+            elif isinstance(lookup, CanonicalClassDefn):
+                assert len(node.args) == 1
+                assert self.tys[id(node.args[0])] == lookup.repr_type
+                self.tys[id(node)] = SymbolType(lookup.interface)
+            else:
+                raise NotImplementedError(f'Unknown function {node.fn}')
+        elif isinstance(node.fn, GetAttrExpr):
+            # TODO: this is very naive
+            base = node.fn.obj
+            attr = node.fn.attr
+            assert id(base) in self.tys
+            assert isinstance(base, Var), "By now, all . should be resolved to Paths"
+            base_ty = self.tys[id(base)]
+            if isinstance(base_ty, SymbolType):
+                lookup = self.lookup_name(self.scope[0], base_ty.symbol)
+                assert isinstance(lookup, CanonicalItfDefn)
+                assert node.fn.attr in lookup.funcs
+                func_fn = lookup.funcs[node.fn.attr]
+                handle_function(func_fn, [this_t] + [self.tys[id(a)] for a in node.args])
+            elif isinstance(base_ty, StructType):
+                assert base.kind == VarKind.THIS, f"Only this is allowed for now, got {base.kind}"
+                assert isinstance(self.scope[-1], CanonicalClassDefn)
+                assert attr in self.scope[-1].funcs
+                func_fn = self.scope[-1].funcs[attr].fn_decl
+                handle_function(func_fn, [base_ty] + [self.tys[id(a)] for a in node.args])
+            
+        elif isinstance(node.fn, Path):
+            assert len(node.fn.path) == 2
+            lookup = self.lookup_path(node.fn)
+            if isinstance(lookup, FuncDecl):
+                func = lookup
+            elif isinstance(lookup, FuncDef):
+                func = lookup.fn_decl
+            handle_function(func, [self.tys[id(a)] for a in node.args])
+        else:
+            raise NotImplementedError(f'Unknown function call {node.fn}')
     
+    def visit_LetStmt(self, node: LetStmt) -> None:
+        self(node.expr)
+        assert id(node.expr) in self.tys
+        if node.value.ty is not None:
+            assert node.value.ty == self.tys[id(node.expr)]
+        else:
+            node.value.ty = self.tys[id(node.expr)]
+            self.tys[id(node.value)] = self.tys[id(node.expr)]
+        self.tys[id(node)] = void_t
+
 
 with open("grammar.lark", 'r') as f:
     grammar = f.read()
@@ -899,7 +1074,10 @@ ast = CanonicalizeClass()(ast)
 # print(ast.doc(DocOptions(show_link=True)).to_str(0))
 ast = CanonicalizeItf()(ast)
 # print(ast.doc(DocOptions(show_link=True)).to_str(0))
-
+ast = CanonicalizeProgram()(ast)
 ast = ResolveSymbolAndVars()(ast)
+infer = TypeInfer()
+infer(ast)
 print(ast.doc(DocOptions(show_link=True)).to_str(0))
+
 
