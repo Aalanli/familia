@@ -1,0 +1,71 @@
+use std::str::FromStr;
+use crate::ast::{Expr, Stmt, AST, Type, Var, IRW, Symbol};
+
+grammar;
+
+pub AST : AST = {
+    "type" <name:Ident> "=" <decl:Type> => AST::TypeDecl { name, decl },
+    <decl:FnDecl> => decl,
+    <decl:FnDecl> <body:StmtBody> => {
+        let AST::FnDecl { name, args, ty } = decl else { unreachable!() };
+        AST::FnImpl {
+            name, args, ty, body
+        }
+    }
+}
+
+pub FnDecl : AST = {
+    "fn" <name:Ident> "(" <args:Comma<Var>> ")" <ret:(":" Type)?> => {
+        AST::FnDecl {
+            name, args, ty:ret.map_or(IRW::new(Type::Void), |x| x.1)
+        }
+    }
+}
+
+pub StmtBody: Vec<Stmt> = {
+    "{" <stmts:Stmt*> "}" => stmts,
+}
+
+pub Stmt: Stmt = {
+    "let" <v:Var> "=" <e:Expr> ";" => Stmt::LetStmt { var:v, expr:e },
+    <e:Expr> ";" => Stmt::ExprStmt { expr:e },
+    <lhs:UnTypedVar> "=" <rhs:Expr> ";" => Stmt::AssignStmt { lhs, rhs },
+    "return" <expr:Expr> ";" => Stmt::ReturnStmt { expr } 
+}
+
+pub Expr: Expr = {
+    <n:Num> => Expr::IntLit(n),
+    <v:Var> => Expr::Var(v),
+    <e:Expr> "." <a:Ident> => Expr::GetAttr { exp: IRW::new(e), sym: a },
+    "(" <l:Expr> "+" <r:Expr> ")" => Expr::Add { lhs:IRW::new(l), rhs:IRW::new(r) },
+    <c:Ident> "(" <args:Comma<Expr>> ")" => Expr::Call { symbol:c, args }
+}
+
+pub Type: IRW<Type> = {
+    "i32" => IRW::new(Type::I32),
+    "{" <v:Comma<TypeVar>> "}" => {
+        Type::from_var(v)
+    }
+}
+
+pub Var: Var = {
+    <v:UnTypedVar> => v,
+    <v:TypeVar> => v
+}
+
+UnTypedVar : Var = <v:Ident> => Var { name : v, ty: None };
+TypeVar : Var = <v:Ident> ":" <t:Type> => Var { name: v, ty: Some(t) };
+
+
+Comma<T>: Vec<T> = { // (1)
+    <mut v:(<T> ",")*> <e:T?> => match e { // (2)
+        None => v,
+        Some(e) => {
+            v.push(e);
+            v
+        }
+    }
+};
+
+Num: i32 = <s:r"[0-9]+"> => i32::from_str(s).unwrap();
+Ident: Symbol = <s:r"[_a-zA-Z][_a-zA-Z0-9]*"> => Symbol::from_str(s);
