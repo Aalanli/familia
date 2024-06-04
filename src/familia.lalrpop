@@ -1,23 +1,25 @@
 use std::str::FromStr;
-use crate::ast::{Expr, Stmt, AST, Type, Var, IRW, Symbol};
+use crate::ast::{Expr, Stmt, Decl, AST, Type, Var, Symbol, P, self};
 
 grammar;
 
-pub AST : AST = {
-    "type" <name:Ident> "=" <decl:Type> => AST::TypeDecl { name, decl },
+pub AST : AST = {<d:Decl*> => AST { decls: d }, }
+
+pub Decl : Decl = {
+    "type" <name:Ident> "=" <decl:Type> => Decl::TypeDecl { name, decl },
     <decl:FnDecl> => decl,
     <decl:FnDecl> <body:StmtBody> => {
-        let AST::FnDecl { name, args, ty } = decl else { unreachable!() };
-        AST::FnImpl {
+        let Decl::FnDecl { name, args, ty } = decl else { unreachable!() };
+        Decl::FnImpl {
             name, args, ty, body
         }
     }
 }
 
-pub FnDecl : AST = {
-    "fn" <name:Ident> "(" <args:Comma<Var>> ")" <ret:(":" Type)?> => {
-        AST::FnDecl {
-            name, args, ty:ret.map_or(IRW::new(Type::Void), |x| x.1)
+pub FnDecl : Decl = {
+    "fn" <name:Ident> "(" <args:Comma<Var>> ")" <ret:(":" <Type>)?> => {
+        Decl::FnDecl {
+            name, args, ty:ret.map_or(Type::Void, |x| x)
         }
     }
 }
@@ -36,16 +38,18 @@ pub Stmt: Stmt = {
 pub Expr: Expr = {
     <n:Num> => Expr::IntLit(n),
     <v:Var> => Expr::Var(v),
-    <e:Expr> "." <a:Ident> => Expr::GetAttr { exp: IRW::new(e), sym: a },
-    "(" <l:Expr> "+" <r:Expr> ")" => Expr::Add { lhs:IRW::new(l), rhs:IRW::new(r) },
-    <c:Ident> "(" <args:Comma<Expr>> ")" => Expr::Call { symbol:c, args }
+    <e:Expr> "." <a:Ident> => Expr::GetAttr { exp: P(e), sym: a },
+    "(" <l:Expr> "+" <r:Expr> ")" => Expr::Add { lhs:P(l), rhs:P(r) },
+    <c:Ident> "(" <args:Comma<Expr>> ")" => Expr::Call { symbol:c, args },
+    "{" <args:Comma<(<Ident> ":" <Expr>)>> "}" => Expr::Struct { args },
 }
 
-pub Type: IRW<Type> = {
-    "i32" => IRW::new(Type::I32),
+pub Type: Type = {
+    "i32" => Type::I32,
     "{" <v:Comma<TypeVar>> "}" => {
         Type::from_var(v)
-    }
+    },
+    <s: Ident> => Type::Symbol(s)
 }
 
 pub Var: Var = {
