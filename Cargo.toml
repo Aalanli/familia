@@ -1,12 +1,8 @@
-[package]
-name = "familia"
-version = "0.1.0"
-authors = ["Allan Lin <a8lin@uwaterloo.ca>"]
-edition = "2021"
+[workspace]
 
-[build-dependencies]
-lalrpop = "0.20.2"
+resolver = "2"
+members = [
+    "frontend",
+    "codegen",
+]
 
-[dependencies]
-lalrpop-util = { version = "0.20.2", features = ["lexer", "unicode"] }
-inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm18-0"] }

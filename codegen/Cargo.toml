@@ -1,0 +1,11 @@
+[package]
+name = "familia-codegen"
+version = "0.1.0"
+authors = ["Allan Lin <a8lin@uwaterloo.ca>"]
+edition = "2021"
+
+[dependencies]
+familia = { path = "../frontend" }
+
+inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm18-0"] }
+anyhow = "1.0.86"
