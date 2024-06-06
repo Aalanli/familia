@@ -1,5 +1,11 @@
 # TODO: consider moving to build.rs
 
+if [ -d thirdparty ]; then
+    echo "thirdparty directory already exists"
+else
+    mkdir thirdparty
+fi
+
 cd thirdparty
 # save current path
 export THIRD_PARTY_PATH=$(pwd)
@@ -24,4 +30,4 @@ fi
 mkdir build
 cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=$THIRD_PARTY_PATH -DCMAKE_BUILD_TYPE=release -DLLVM_ENABLE_ASSERTIONS=ON
-cmake --build . --target install -j 8
+cmake --build . --target install -j 4
