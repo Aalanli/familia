@@ -30,4 +30,9 @@ fi
 mkdir build
 cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=$THIRD_PARTY_PATH -DCMAKE_BUILD_TYPE=release -DLLVM_ENABLE_ASSERTIONS=ON
-cmake --build . --target install -j 4
+
+# TODO: -j 8 may run out of memory
+cmake --build . --target install -j 8
+
+# TODO: add llvm to path
+# export LLVM_SYS_180_PREFIX="/path/to/thirdparty"

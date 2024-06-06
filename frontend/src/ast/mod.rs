@@ -12,9 +12,7 @@ pub struct Symbol {
 
 impl Symbol {
     pub fn from_str(s: &str) -> Self {
-        Symbol {
-            name: Rc::from(s)
-        }
+        Symbol { name: Rc::from(s) }
     }
 
     pub fn view(&self) -> &str {
@@ -25,17 +23,15 @@ impl Symbol {
 #[derive(Clone)]
 pub struct Var {
     pub name: Symbol,
-    pub ty: Option<Type>
+    pub ty: Option<Type>,
 }
 
 #[derive(Clone)]
 pub enum Type {
     Void,
     I32,
-    Struct {
-        fields: HashMap<Symbol, Type>,
-    },
-    Symbol(Symbol)
+    Struct { fields: HashMap<Symbol, Type> },
+    Symbol(Symbol),
 }
 
 impl Type {
@@ -44,14 +40,12 @@ impl Type {
         for v in vars {
             map.insert(v.name, v.ty.unwrap());
         }
-        Type::Struct {
-            fields: map
-        }
+        Type::Struct { fields: map }
     }
 }
 
 pub struct AST {
-    pub decls: Vec<Decl>
+    pub decls: Vec<Decl>,
 }
 
 pub enum Decl {
@@ -62,51 +56,29 @@ pub enum Decl {
     FnDecl {
         name: Symbol,
         args: Vec<Var>,
-        ty: Type
+        ty: Type,
     },
     FnImpl {
         name: Symbol,
         args: Vec<Var>,
         ty: Type,
-        body: Vec<Stmt>
-    }
+        body: Vec<Stmt>,
+    },
 }
 
-
 pub enum Stmt {
-    LetStmt {
-        var: Var,
-        expr: Expr,
-    },
-    ExprStmt {
-        expr: Expr,
-    },
-    AssignStmt {
-        lhs: Var,
-        rhs: Expr,
-    },
-    ReturnStmt {
-        expr: Expr
-    }
+    LetStmt { var: Var, expr: Expr },
+    ExprStmt { expr: Expr },
+    // AssignStmt { lhs: Var, rhs: Expr },
+    ReturnStmt { expr: Expr },
 }
 
 #[derive(Clone)]
 pub enum Expr {
     Var(Var),
     IntLit(i32),
-    GetAttr {
-        exp: P<Expr>,
-        sym: Symbol,
-    },
-    Add {
-        lhs: P<Expr>,
-        rhs: P<Expr>,
-    },
-    Call {
-        symbol: Symbol,
-        args: Vec<Expr>,
-    },
-    Struct {
-        args: Vec<(Symbol, Expr)>
-    },
+    GetAttr { exp: P<Expr>, sym: Symbol },
+    Add { lhs: P<Expr>, rhs: P<Expr> },
+    Call { symbol: Symbol, args: Vec<Expr> },
+    Struct { args: Vec<(Symbol, Expr)> },
 }

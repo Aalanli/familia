@@ -27,13 +27,12 @@ impl<T> P<T> {
     }
 }
 
-impl <T: Clone> P<T> {
+impl<T: Clone> P<T> {
     pub fn get_mut(&mut self) -> &mut T {
         // self.hash = OnceCell::new();
         Rc::make_mut(&mut self.data)
     }
 }
-
 
 impl<T> Deref for P<T> {
     type Target = T;

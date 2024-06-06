@@ -1,4 +1,3 @@
-
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::execution_engine::{ExecutionEngine, JitFunction};
@@ -43,8 +42,6 @@ use inkwell::{
     targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine},
 };
 
-
-
 fn run_passes_on(module: &Module) {
     Target::initialize_all(&InitializationConfig::default());
     let target_triple = TargetMachine::get_default_triple();
@@ -69,14 +66,18 @@ fn run_passes_on(module: &Module) {
         "mem2reg",
     ];
 
-    
     module
-    .run_passes(passes.join(",").as_str(), &target_machine, PassBuilderOptions::create())
-    .unwrap();
+        .run_passes(
+            passes.join(",").as_str(),
+            &target_machine,
+            PassBuilderOptions::create(),
+        )
+        .unwrap();
 
-    let t = target_machine.write_to_memory_buffer(module, inkwell::targets::FileType::Assembly).unwrap();
+    let t = target_machine
+        .write_to_memory_buffer(module, inkwell::targets::FileType::Assembly)
+        .unwrap();
     println!("{}", String::from_utf8(t.as_slice().to_vec()).unwrap());
-        
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -90,10 +91,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         execution_engine,
     };
 
-    let sum = codegen.jit_compile_sum().ok_or("Unable to JIT compile `sum`")?;
+    let sum = codegen
+        .jit_compile_sum()
+        .ok_or("Unable to JIT compile `sum`")?;
     run_passes_on(&codegen.module);
     let m = codegen.module.to_string();
-    
+
     println!("{}", m);
 
     let x = 1u64;

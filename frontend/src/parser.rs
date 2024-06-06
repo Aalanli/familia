@@ -1,5 +1,5 @@
-use lalrpop_util::lalrpop_mod;
 use crate::ast::AST;
+use lalrpop_util::lalrpop_mod;
 
 lalrpop_mod!(pub familia);
 
@@ -13,19 +13,33 @@ mod parse_test {
 
     #[test]
     fn test_parse() {
-        parse("\
+        // type decl
+        parse(
+            "\
             type T = {
                 a: i32,
                 b: i32
             }
-        ");
-        parse("\
+        ",
+        );
+        // fn decl
+        parse(
+            "\
             type T = {a: i32, b: i32}
             type R = {a: T, b: T}
             
             fn foo(a: R, b: T): i32 {
                 return (a.a.a + b.b);
             }
-        ");
+        ",
+        );
+        // fn call
+        parse(
+            "\
+            fn main() {
+                foo({a: {a: 1, b: 2}, b: {a: 3, b: 4}}, {a: 5, b: 6});
+            }
+        ",
+        );
     }
 }
