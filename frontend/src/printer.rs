@@ -1,4 +1,3 @@
-
 pub enum Doc {
     Text(String),
     Lines(Vec<Doc>),
@@ -32,14 +31,14 @@ impl Doc {
                     buf.push(' ');
                 }
                 buf.push_str(s)
-            },
+            }
             Doc::Indent(d) => {
                 d.render_to(buf, indent + 2);
             }
             Doc::Concat(d1, d2) => {
                 d1.render_to(buf, indent);
                 d2.render_to(buf, indent);
-            },
+            }
             Doc::Lines(ds) => {
                 for d in ds {
                     buf.push('\n');

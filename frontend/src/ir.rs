@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use anyhow::{Error, Result};
-use itertools::Itertools;
 
 use super::ast;
 
@@ -74,7 +73,11 @@ impl IR {
 
     pub fn new_op(&mut self, kind: OPKind) -> OPID {
         let id = OPID(self.new_id());
-        let op = OP { id: id, kind: kind, var: VarID(self.new_id()) };
+        let op = OP {
+            id: id,
+            kind: kind,
+            var: VarID(self.new_id()),
+        };
         self.ops.insert(id, op);
         id
     }
@@ -181,7 +184,7 @@ pub struct OPID(NodeID);
 pub struct OP {
     pub id: OPID,
     pub kind: OPKind,
-    pub var: VarID
+    pub var: VarID,
 }
 
 pub enum OPKind {
@@ -206,7 +209,7 @@ pub enum OPKind {
     },
     Constant {
         value: i32,
-    }
+    },
 }
 
 struct VarScope {
@@ -237,7 +240,6 @@ impl VarScope {
         None
     }
 }
-
 
 struct AstToIR {
     ir: IR,
@@ -380,7 +382,7 @@ impl AstToIR {
                 ast::Stmt::LetStmt { var, expr } => {
                     let s = self.intern_symbol(&var.name);
                     let ty = var.ty.as_ref().map(|ty| self.get_type_id(ty)).transpose()?;
-                    
+
                     let var_id = self.ir.new_var(s, ty);
 
                     self.expr(var_scope, expr, &mut ops)?;
@@ -388,10 +390,10 @@ impl AstToIR {
                     self.ir.get_op_mut(*ops.last().unwrap()).var = var_id;
                     // corresponds to ast::Expr::Var
                     var_scope.insert(s, var_id);
-                },
+                }
                 ast::Stmt::ExprStmt { expr } => {
                     self.expr(var_scope, expr, &mut ops)?;
-                },
+                }
                 ast::Stmt::ReturnStmt { expr } => {
                     self.expr(var_scope, expr, &mut ops)?;
                 }
@@ -400,50 +402,68 @@ impl AstToIR {
         Ok(ops)
     }
 
-    pub fn expr(&mut self, var_scope: &mut VarScope, expr: &ast::Expr, ops: &mut Vec<OPID>) -> Result<VarID> {
+    pub fn expr(
+        &mut self,
+        var_scope: &mut VarScope,
+        expr: &ast::Expr,
+        ops: &mut Vec<OPID>,
+    ) -> Result<VarID> {
         match expr {
             ast::Expr::Var(v) => {
                 let s = self.intern_symbol(&v.name);
                 let var = var_scope.get(s).ok_or(Error::msg("unbound variable"))?;
                 Ok(var)
-            },
+            }
             ast::Expr::IntLit(i) => {
                 let op = self.ir.new_op(OPKind::Constant { value: *i });
                 ops.push(op);
                 Ok(self.ir.get_op_var(op))
-            },
+            }
             ast::Expr::GetAttr { exp, sym } => {
                 let exp = self.expr(var_scope, exp, ops)?;
                 let sym = self.intern_symbol(sym);
-                let op = self.ir.new_op(OPKind::GetAttr { obj: exp, attr: sym, idx: None });
+                let op = self.ir.new_op(OPKind::GetAttr {
+                    obj: exp,
+                    attr: sym,
+                    idx: None,
+                });
                 ops.push(op);
                 Ok(self.ir.get_op_var(op))
-            },
+            }
             ast::Expr::Add { lhs, rhs } => {
                 let lhs = self.expr(var_scope, lhs, ops)?;
                 let rhs = self.expr(var_scope, rhs, ops)?;
                 let op = self.ir.new_op(OPKind::Add { lhs, rhs });
                 ops.push(op);
                 Ok(self.ir.get_op_var(op))
-            },
+            }
             ast::Expr::Call { symbol, args } => {
                 let fn_id = self.get_symbol(symbol)?;
-                
-                let args = args.iter().map(|arg| self.expr(var_scope, arg, ops)).collect::<Result<Vec<_>>>()?;
-                let op = self.ir.new_op(OPKind::Call { func: FuncID(fn_id), args });
+
+                let args = args
+                    .iter()
+                    .map(|arg| self.expr(var_scope, arg, ops))
+                    .collect::<Result<Vec<_>>>()?;
+                let op = self.ir.new_op(OPKind::Call {
+                    func: FuncID(fn_id),
+                    args,
+                });
                 ops.push(op);
                 Ok(self.ir.get_op_var(op))
-            },
+            }
             ast::Expr::Struct { args } => {
-                let args = args.iter().map(|(sym, expr)| {
-                    let sym = self.intern_symbol(sym);
-                    let expr = self.expr(var_scope, expr, ops)?;
-                    Ok((sym, expr))
-                }).collect::<Result<Vec<_>>>()?;
+                let args = args
+                    .iter()
+                    .map(|(sym, expr)| {
+                        let sym = self.intern_symbol(sym);
+                        let expr = self.expr(var_scope, expr, ops)?;
+                        Ok((sym, expr))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
                 let op = self.ir.new_op(OPKind::Struct { fields: args });
                 ops.push(op);
                 Ok(self.ir.get_op_var(op))
-            },
+            }
         }
     }
 
@@ -461,8 +481,7 @@ impl AstToIR {
 
 use crate::printer::Doc;
 
-struct IRPrinter {
-}
+struct IRPrinter {}
 
 impl IRPrinter {
     pub fn new() -> Self {
