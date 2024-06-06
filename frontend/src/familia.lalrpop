@@ -31,7 +31,7 @@ pub StmtBody: Vec<Stmt> = {
 pub Stmt: Stmt = {
     "let" <v:Var> "=" <e:Expr> ";" => Stmt::LetStmt { var:v, expr:e },
     <e:Expr> ";" => Stmt::ExprStmt { expr:e },
-    <lhs:UnTypedVar> "=" <rhs:Expr> ";" => Stmt::AssignStmt { lhs, rhs },
+//    <lhs:UnTypedVar> "=" <rhs:Expr> ";" => Stmt::AssignStmt { lhs, rhs },
     "return" <expr:Expr> ";" => Stmt::ReturnStmt { expr } 
 }
 

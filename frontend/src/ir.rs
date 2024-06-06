@@ -74,13 +74,17 @@ impl IR {
 
     pub fn new_op(&mut self, kind: OPKind) -> OPID {
         let id = OPID(self.new_id());
-        let op = OP { id: id, kind: kind };
+        let op = OP { id: id, kind: kind, var: VarID(self.new_id()) };
         self.ops.insert(id, op);
         id
     }
 
     pub fn get_op(&self, id: OPID) -> &OP {
         self.ops.get(&id).unwrap()
+    }
+
+    pub fn get_op_var(&self, id: OPID) -> VarID {
+        self.get_op(id).var
     }
 
     pub fn get_op_mut(&mut self, id: OPID) -> &mut OP {
@@ -177,6 +181,7 @@ pub struct OPID(NodeID);
 pub struct OP {
     pub id: OPID,
     pub kind: OPKind,
+    pub var: VarID
 }
 
 pub enum OPKind {
@@ -196,7 +201,43 @@ pub enum OPKind {
     Struct {
         fields: Vec<(SymbolID, VarID)>,
     },
+    Return {
+        value: VarID,
+    },
+    Constant {
+        value: i32,
+    }
 }
+
+struct VarScope {
+    vars: Vec<HashMap<SymbolID, VarID>>,
+}
+
+impl VarScope {
+    fn new() -> Self {
+        VarScope { vars: vec![] }
+    }
+
+    fn with_new_scope(&mut self, f: impl FnOnce(&mut Self)) {
+        self.vars.push(HashMap::new());
+        f(self);
+        self.vars.pop();
+    }
+
+    fn insert(&mut self, symbol: SymbolID, var: VarID) {
+        self.vars.last_mut().unwrap().insert(symbol, var);
+    }
+
+    fn get(&self, symbol: SymbolID) -> Option<VarID> {
+        for scope in self.vars.iter().rev() {
+            if let Some(var) = scope.get(&symbol) {
+                return Some(*var);
+            }
+        }
+        None
+    }
+}
+
 
 struct AstToIR {
     ir: IR,
@@ -205,8 +246,6 @@ struct AstToIR {
 
 impl AstToIR {
     pub fn new() -> Self {
-        let mut ir = IR::new();
-
         AstToIR {
             ir: IR::new(),
             symbol_map: HashMap::new(),
@@ -334,6 +373,80 @@ impl AstToIR {
         Ok(())
     }
 
+    pub fn stmt(&mut self, var_scope: &mut VarScope, stmt: &[ast::Stmt]) -> Result<Vec<OPID>> {
+        let mut ops = vec![];
+        for stmt in stmt.iter() {
+            match stmt {
+                ast::Stmt::LetStmt { var, expr } => {
+                    let s = self.intern_symbol(&var.name);
+                    let ty = var.ty.as_ref().map(|ty| self.get_type_id(ty)).transpose()?;
+                    
+                    let var_id = self.ir.new_var(s, ty);
+
+                    self.expr(var_scope, expr, &mut ops)?;
+                    // bind the last op to the variable
+                    self.ir.get_op_mut(*ops.last().unwrap()).var = var_id;
+                    // corresponds to ast::Expr::Var
+                    var_scope.insert(s, var_id);
+                },
+                ast::Stmt::ExprStmt { expr } => {
+                    self.expr(var_scope, expr, &mut ops)?;
+                },
+                ast::Stmt::ReturnStmt { expr } => {
+                    self.expr(var_scope, expr, &mut ops)?;
+                }
+            }
+        }
+        Ok(ops)
+    }
+
+    pub fn expr(&mut self, var_scope: &mut VarScope, expr: &ast::Expr, ops: &mut Vec<OPID>) -> Result<VarID> {
+        match expr {
+            ast::Expr::Var(v) => {
+                let s = self.intern_symbol(&v.name);
+                let var = var_scope.get(s).ok_or(Error::msg("unbound variable"))?;
+                Ok(var)
+            },
+            ast::Expr::IntLit(i) => {
+                let op = self.ir.new_op(OPKind::Constant { value: *i });
+                ops.push(op);
+                Ok(self.ir.get_op_var(op))
+            },
+            ast::Expr::GetAttr { exp, sym } => {
+                let exp = self.expr(var_scope, exp, ops)?;
+                let sym = self.intern_symbol(sym);
+                let op = self.ir.new_op(OPKind::GetAttr { obj: exp, attr: sym, idx: None });
+                ops.push(op);
+                Ok(self.ir.get_op_var(op))
+            },
+            ast::Expr::Add { lhs, rhs } => {
+                let lhs = self.expr(var_scope, lhs, ops)?;
+                let rhs = self.expr(var_scope, rhs, ops)?;
+                let op = self.ir.new_op(OPKind::Add { lhs, rhs });
+                ops.push(op);
+                Ok(self.ir.get_op_var(op))
+            },
+            ast::Expr::Call { symbol, args } => {
+                let fn_id = self.get_symbol(symbol)?;
+                
+                let args = args.iter().map(|arg| self.expr(var_scope, arg, ops)).collect::<Result<Vec<_>>>()?;
+                let op = self.ir.new_op(OPKind::Call { func: FuncID(fn_id), args });
+                ops.push(op);
+                Ok(self.ir.get_op_var(op))
+            },
+            ast::Expr::Struct { args } => {
+                let args = args.iter().map(|(sym, expr)| {
+                    let sym = self.intern_symbol(sym);
+                    let expr = self.expr(var_scope, expr, ops)?;
+                    Ok((sym, expr))
+                }).collect::<Result<Vec<_>>>()?;
+                let op = self.ir.new_op(OPKind::Struct { fields: args });
+                ops.push(op);
+                Ok(self.ir.get_op_var(op))
+            },
+        }
+    }
+
     fn get_symbol(&self, symbol: &ast::Symbol) -> Result<NodeID> {
         self.symbol_map
             .get(symbol)
@@ -343,5 +456,25 @@ impl AstToIR {
 
     pub fn intern_symbol(&mut self, symbol: &ast::Symbol) -> SymbolID {
         return self.ir.new_symbol(symbol.view());
+    }
+}
+
+use crate::printer::Doc;
+
+struct IRPrinter {
+}
+
+impl IRPrinter {
+    pub fn new() -> Self {
+        IRPrinter {}
+    }
+
+    pub fn ir(&self, ir: &IR) -> Doc {
+        // let mut doc = Doc::text("IR\n");
+        // for (id, symbol) in ir.symbols.iter() {
+        //     doc = doc.concat(Doc::text(&format!("{}: {}\n", id.0, symbol.name)));
+        // }
+        // doc
+        todo!()
     }
 }

@@ -69,7 +69,7 @@ pub enum Decl {
 pub enum Stmt {
     LetStmt { var: Var, expr: Expr },
     ExprStmt { expr: Expr },
-    AssignStmt { lhs: Var, rhs: Expr },
+    // AssignStmt { lhs: Var, rhs: Expr },
     ReturnStmt { expr: Expr },
 }
 
