@@ -479,7 +479,7 @@ impl AstToIR {
     }
 }
 
-use crate::printer::Doc;
+use crate::printer::{Doc, text, lines};
 
 struct IRPrinter {}
 

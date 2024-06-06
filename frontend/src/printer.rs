@@ -1,3 +1,6 @@
+use std::fmt;
+
+#[derive(Clone)]
 pub enum Doc {
     Text(String),
     Lines(Vec<Doc>),
@@ -5,11 +8,16 @@ pub enum Doc {
     Concat(Box<Doc>, Box<Doc>),
 }
 
-impl Doc {
-    pub fn text(s: &str) -> Doc {
-        Doc::Text(s.to_string())
-    }
+pub fn text<S: AsRef<str>>(s: S) -> Doc {
+    let s = s.as_ref();
+    Doc::Text(s.to_string())
+}
 
+pub fn lines(ds: &[Doc]) -> Doc {
+    Doc::Lines(ds.to_vec())
+}
+
+impl Doc {
     pub fn indent(self) -> Doc {
         Doc::Indent(Box::new(self))
     }
@@ -18,42 +26,40 @@ impl Doc {
         Doc::Concat(Box::new(self), Box::new(d2))
     }
 
-    pub fn render(&self) -> String {
-        let mut buf = String::new();
-        self.render_to(&mut buf, 0);
-        buf
+    pub fn render(&self, buf: &mut impl fmt::Write) -> fmt::Result {
+        self.render_to(buf, 0)
     }
 
-    fn render_to(&self, buf: &mut String, indent: usize) {
+    fn render_to(&self, buf: &mut impl fmt::Write, indent: usize) -> fmt::Result {
         match self {
             Doc::Text(s) => {
                 for _ in 0..indent {
-                    buf.push(' ');
+                    buf.write_char(' ')?;
                 }
-                buf.push_str(s)
+                buf.write_str(s)?;
             }
             Doc::Indent(d) => {
-                d.render_to(buf, indent + 2);
+                d.render_to(buf, indent + 2)?;
             }
             Doc::Concat(d1, d2) => {
-                d1.render_to(buf, indent);
-                d2.render_to(buf, indent);
+                d1.render_to(buf, indent)?;
+                d2.render_to(buf, indent)?;
             }
             Doc::Lines(ds) => {
                 for d in ds {
-                    buf.push('\n');
-                    d.render_to(buf, indent);
+                    buf.write_char('\n')?;
+                    d.render_to(buf, indent)?;
                 }
             }
         }
+        Ok(())
     }
 }
 
-use std::fmt;
 
 impl fmt::Display for Doc {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.render())
+        self.render(f)
     }
 }
 
