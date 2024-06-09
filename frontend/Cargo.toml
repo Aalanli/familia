@@ -1,5 +1,5 @@
 [package]
-name = "familia"
+name = "familia_frontend"
 version = "0.1.0"
 authors = ["Allan Lin <a8lin@uwaterloo.ca>"]
 edition = "2021"

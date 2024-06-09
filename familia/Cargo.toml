@@ -1,0 +1,15 @@
+[package]
+name = "familia"
+version = "0.1.0"
+authors = ["Allan Lin <a8lin@uwaterloo.ca>"]
+edition = "2021"
+description = "A compiler for the familia language"
+
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+familia_frontend = { path = "../frontend" }
+familia_codegen = { path = "../codegen" }
+clap = { version = "4.5.6", features = ["derive"] }
+

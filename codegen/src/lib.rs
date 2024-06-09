@@ -11,7 +11,7 @@ use inkwell::OptimizationLevel;
 
 use anyhow::{Result, Error};
 
-use familia::ir;
+use familia_frontend::ir;
 
 struct CodeGen<'ctx, 'ir> {
     context: &'ctx Context,
@@ -85,14 +85,15 @@ impl <'ctx, 'ir> CodeGen<'ctx, 'ir> {
             ir::TypeKind::I32 => {
                 self.context.i32_type().into()
             }
-            ir::TypeKind::Struct { fields, name } => {
+            ir::TypeKind::Struct { fields } => {
                 let mut field_types = Vec::new();
                 for field in fields {
                     let field_ty = self.codegen_type(field.1)?;
                     field_types.push(field_ty);
                 }
-                if let Some(name) = name {
-                    let name = &self.ir.get_symbol(*name).name;
+
+                if let Some(name) = self.ir.get_decl_type_name(ty_id) {
+                    let name = &self.ir.get_symbol(name).name;
                     let struct_ty = self.context.opaque_struct_type(name);
                     struct_ty.set_body(field_types.as_slice(), false);
                     struct_ty.into()
@@ -114,7 +115,7 @@ fn test_struct() {
 
     let ty = context.opaque_struct_type("footy");
     ty.set_body(&[context.f128_type().into(), context.i32_type().into()], false);
-    println!("{}", ty.is_opaque());
+    assert!(!ty.is_opaque());
 
     let builder1 = context.create_builder();
     let builder2 = context.create_builder();
@@ -134,5 +135,5 @@ fn test_struct() {
     builder2.build_return(None).unwrap();
 
     let module_str = module.print_to_string().to_string();
-    println!("{}", module_str);
+    // println!("{}", module_str);
 }
