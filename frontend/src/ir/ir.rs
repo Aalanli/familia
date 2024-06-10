@@ -1,5 +1,10 @@
 use std::cell::{Cell, Ref, RefCell};
 use std::collections::HashMap;
+use std::hash::Hash;
+
+pub trait ID: Copy + Eq + Hash {
+    type Node;
+}
 
 pub struct IR {
     // this is a little iffy, we should separate these immutable fields into a separate structure
@@ -90,6 +95,15 @@ impl IR {
             kind: kind,
             var: VarID(self.new_id()),
         };
+        let empty_name = self.new_symbol("");
+        self.vars.insert(
+            op.var,
+            Var {
+                id: op.var,
+                name: empty_name,
+                ty: None,
+            },
+        );
         self.ops.insert(id, op);
         id
     }
@@ -133,7 +147,7 @@ impl IR {
         if self.type_map.borrow().contains_key(&kind) {
             return self.type_map.borrow()[&kind];
         }
-        
+
         let id = TypeID(self.new_id());
         self.type_map.borrow_mut().insert(kind.clone(), id);
         let ty = Type { id: id, kind: kind };
@@ -148,7 +162,7 @@ impl IR {
     pub fn get_decl_type_name(&self, id: TypeID) -> Option<SymbolID> {
         self.global_ty_decls.get(&id).cloned()
     }
-    
+
     pub fn get_type(&self, id: TypeID) -> Ref<Type> {
         let a = self.types.borrow();
         let b = Ref::map(a, |a| a.get(&id).unwrap());
@@ -162,7 +176,7 @@ impl IR {
     pub fn void_id(&self) -> TypeID {
         self.void_id
     }
-    
+
     pub fn types<'a>(&'a self) -> Vec<TypeID> {
         self.types.borrow().keys().cloned().collect()
     }
@@ -205,7 +219,6 @@ pub struct TypeDecl {
     pub name: SymbolID,
     pub decl: TypeID,
 }
-
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub enum TypeKind {
@@ -298,7 +311,6 @@ impl VarScope {
     }
 }
 
-
 pub fn ast_to_ir(ast: &ast::AST) -> Result<IR> {
     let mut ast_to_ir = AstToIR::new();
     ast_to_ir.ast(ast)?;
@@ -327,10 +339,7 @@ impl AstToIR {
                 ast::Decl::FnDecl { .. } => {
                     return Err(Error::msg("no fn decl in global scope"));
                 }
-                ast::Decl::FnImpl {
-                    name,
-                    ..
-                } => {
+                ast::Decl::FnImpl { name, .. } => {
                     self.symbol_map.insert(name.clone(), self.ir.new_id());
                 }
             }
@@ -417,7 +426,10 @@ impl AstToIR {
         let name_id = self.intern_symbol(name);
         self.ir.decl_type_name(tid, name_id);
         self.ir.type_map.borrow_mut().insert(ty.clone(), tid);
-        self.ir.types.borrow_mut().insert(tid, Type { id: tid, kind: ty });
+        self.ir
+            .types
+            .borrow_mut()
+            .insert(tid, Type { id: tid, kind: ty });
 
         Ok(())
     }
@@ -573,61 +585,164 @@ impl AstToIR {
     }
 }
 
-use crate::printer::{Doc, text, lines};
+use crate::printer::{join, lines, text, Doc};
 
 struct IRPrinter<'ir> {
     ir: &'ir IR,
     var_prefixes: HashMap<&'ir str, u32>,
-    // symbol_prefixes: HashMap<&'ir str, u32>,
+    varid_names: HashMap<VarID, String>, // symbol_prefixes: HashMap<&'ir str, u32>,
 }
 
 impl<'ir> IRPrinter<'ir> {
     fn new(ir: &'ir IR) -> Self {
-        IRPrinter { ir, var_prefixes: HashMap::new() }
+        IRPrinter {
+            ir,
+            var_prefixes: HashMap::new(),
+            varid_names: HashMap::new(),
+        }
     }
 
-    fn name_var(&mut self, var: VarID) -> Doc {
+    fn dump(&mut self) -> String {
+        let mut globals = vec![];
+
+        for id in self.ir.types() {
+            if let Some(name) = self.ir.get_decl_type_name(id) {
+                let name = self.ir.get_symbol(name);
+                let doc = format!("type {} = {}", name.name, self.dump_types(id));
+                globals.push(doc);
+                globals.push("\n".to_string());
+            }
+        }
+
+        for funcs in self.ir.functions() {
+            let mut doc = self.dump_functions(*funcs.0);
+            globals.append(&mut doc);
+            globals.push("\n".to_string());
+        }
+
+        join("\n", globals.into_iter())
+    }
+
+    fn name_var(&mut self, var: VarID) -> String {
+        if let Some(name) = self.varid_names.get(&var) {
+            return name.clone();
+        }
         let var = self.ir.get_var(var);
         let symbol = self.ir.get_symbol(var.name);
-        
+
         let prefix = *self.var_prefixes.get(&*symbol.name).unwrap_or(&0);
         self.var_prefixes.insert(&*symbol.name, prefix + 1);
-        text(format!("{}{}", symbol.name, prefix))
+
+        let name = format!("%{}{}", symbol.name, prefix);
+        self.varid_names.insert(var.id, name.clone());
+        name
     }
 
-    fn dump_types(&mut self, ty_id: TypeID) -> Doc {
+    fn dump_types(&mut self, ty_id: TypeID) -> String {
         let ty = self.ir.get_type(ty_id);
         let doc = match &ty.kind {
-            TypeKind::I32 => text("i32"),
-            TypeKind::Void => text("void"),
+            TypeKind::I32 => "i32".to_string(),
+            TypeKind::Void => "void".to_string(),
             TypeKind::Struct { fields } => {
-                let mut docs = vec![text("{")];
+                let mut field_list = "{".to_string();
 
-                for (sym, ty) in fields.iter() {
+                let fields = fields.iter().map(|(sym, ty)| {
                     let sym = self.ir.get_symbol(*sym);
                     let doc = if let Some(s) = self.ir.get_decl_type_name(*ty) {
-                        text(format!("{}: {}", sym.name, self.ir.get_symbol(s).name))
+                        format!("{}: {}", sym.name, self.ir.get_symbol(s).name)
                     } else {
-                        text(format!("{}: ", sym.name)).concat(self.dump_types(*ty))
+                        format!("{}: {}", sym.name, self.dump_types(*ty))
                     };
-                    docs.push(doc);
-                }
-                docs.push(text("}"));
-                lines(&docs)
+                    doc
+                });
+                let fields = join(", ", fields);
+                field_list.push_str(&fields);
+                field_list.push_str("}");
+                field_list
             }
         };
         doc
     }
 
-    
+    fn dump_functions(&mut self, fn_id: FuncID) -> Vec<String> {
+        let func = self.ir.get_function(fn_id);
+        let mut lines = vec![];
+        let fn_name = &self.ir.get_symbol(func.decl.name).name;
+        let args = func.vars.iter().map(|id| {
+            let var = self.ir.get_var(*id);
+            let ty = self.dump_types(var.ty.unwrap());
+            format!("{}: {}", self.name_var(*id), ty)
+        });
+        lines.push(format!(
+            "fn {}({}): {} {{",
+            fn_name,
+            join(", ", args),
+            self.dump_types(func.decl.ret_ty)
+        ));
+        for op_id in &func.body {
+            let doc = self.dump_op(*op_id);
+            lines.push(format!("  {doc}"));
+        }
+        lines.push("}".to_string());
+        lines
+    }
+
+    fn dump_op(&mut self, op_id: OPID) -> String {
+        let op = self.ir.get_op(op_id);
+        let var = self.name_var(op.var);
+        let doc = match &op.kind {
+            OPKind::GetAttr { obj, attr, idx } => {
+                let obj = self.name_var(*obj);
+                let attr = &self.ir.get_symbol(*attr).name;
+                format!("{var} = {obj}.{attr}")
+            }
+            OPKind::Call { func, args } => {
+                let func = self.ir.get_function(*func).decl.name;
+                let func_name = &self.ir.get_symbol(func).name;
+                let args = args.iter().map(|arg| self.name_var(*arg));
+                let args = join(", ", args);
+                format!("{var} = @{func_name}({args})")
+            }
+            OPKind::Add { lhs, rhs } => {
+                let var = self.name_var(op.var);
+                let lhs = self.name_var(*lhs);
+                let rhs = self.name_var(*rhs);
+                format!("{var} = {lhs} + {rhs}")
+            }
+            OPKind::Struct { fields } => {
+                let var = self.name_var(op.var);
+                let fields = fields.iter().map(|(sym, var)| {
+                    let sym = &self.ir.get_symbol(*sym).name;
+                    let var = self.name_var(*var);
+                    format!("{sym}: {var}")
+                });
+                let fields = "{".to_string() + &join(", ", fields) + "}";
+                format!("{var} = {fields} ")
+            }
+            OPKind::Return { value } => {
+                let value = self.name_var(*value);
+                format!("return {}", value)
+            }
+            OPKind::Constant { value } => {
+                let var = self.name_var(op.var);
+                format!("{var} = constant({})", value)
+            }
+        };
+        doc
+    }
+}
+
+pub fn dump_ir(ir: &IR) -> String {
+    let mut printer = IRPrinter::new(ir);
+    let doc = printer.dump();
+    doc
 }
 
 #[cfg(test)]
 mod test_ast_to_ir {
     use super::*;
-    use crate::ast;
-    use crate::parser::parse;
     use crate::ir::ast_to_ir;
+    use crate::parser::parse;
 
     #[test]
     fn test_ast_to_ir() {
@@ -647,7 +762,7 @@ mod test_ast_to_ir {
         )
         .unwrap();
         let ir = ast_to_ir(&ast).unwrap();
-
+        let s = dump_ir(&ir);
+        println!("{}", s);
     }
 }
-

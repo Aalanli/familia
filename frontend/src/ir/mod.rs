@@ -5,11 +5,18 @@ use anyhow::{Error, Result};
 
 mod ir;
 
-pub use ir::{IR, NodeID, Symbol, SymbolID, Type, TypeKind, TypeID, Var, VarID, FuncImpl, FuncID, OPID, OPKind};
 pub use ir::ast_to_ir;
+pub use ir::{
+    FuncID, FuncImpl, NodeID, OPKind, Symbol, SymbolID, Type, TypeID, TypeKind, Var, VarID, IR,
+    OPID, dump_ir
+};
 
 pub fn typecheck(ir: &mut IR) -> Result<()> {
-    let mut var_types = ir.vars().filter(|(id, var)| {var.ty.is_some()}).map(|(id, var)| (*id, var.ty.unwrap())).collect::<HashMap<_, _>>();
+    let mut var_types = ir
+        .vars()
+        .filter(|(id, var)| var.ty.is_some())
+        .map(|(id, var)| (*id, var.ty.unwrap()))
+        .collect::<HashMap<_, _>>();
 
     for (_, func) in ir.functions() {
         let ret_ty = func.decl.ret_ty;
@@ -44,7 +51,11 @@ pub fn typecheck(ir: &mut IR) -> Result<()> {
                     let obj_ty = var_types[obj];
                     let obj_ty = ir.get_type(obj_ty);
                     if let TypeKind::Struct { fields, .. } = &obj_ty.kind {
-                        let field_ty = fields.iter().find(|(sym, _)| sym == attr).ok_or(Error::msg("field not found"))?.1;
+                        let field_ty = fields
+                            .iter()
+                            .find(|(sym, _)| sym == attr)
+                            .ok_or(Error::msg("field not found"))?
+                            .1;
                         var_types.insert(op.var, field_ty);
                     } else {
                         return Err(Error::msg("type mismatch"));
@@ -57,7 +68,12 @@ pub fn typecheck(ir: &mut IR) -> Result<()> {
                     }
                 }
                 OPKind::Struct { fields } => {
-                    let struct_ty = TypeKind::Struct { fields: fields.iter().map(|(sym, ty)| (*sym, var_types[ty])).collect() };
+                    let struct_ty = TypeKind::Struct {
+                        fields: fields
+                            .iter()
+                            .map(|(sym, ty)| (*sym, var_types[ty]))
+                            .collect(),
+                    };
                     let ty = ir.new_type(struct_ty);
                     if let Some(var_ty) = var_types.get(&op.var) {
                         if *var_ty != ty {
@@ -70,10 +86,9 @@ pub fn typecheck(ir: &mut IR) -> Result<()> {
             }
         }
     }
-    
+
     for (id, ty) in var_types.iter() {
         ir.get_var_mut(*id).ty = Some(*ty);
-        
     }
     Ok(())
 }

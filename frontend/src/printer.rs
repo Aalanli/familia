@@ -1,5 +1,17 @@
 use std::fmt;
 
+pub fn join(sep: &str, ds: impl Iterator<Item = String>) -> String {
+    let mut s = String::new();
+    for d in ds {
+        s.push_str(d.as_ref());
+        s.push_str(sep);
+    }
+    for _ in 0..sep.len() {
+        s.pop();
+    }
+    s
+}
+
 #[derive(Clone)]
 pub enum Doc {
     Text(String),
@@ -18,6 +30,20 @@ pub fn lines(ds: &[Doc]) -> Doc {
 }
 
 impl Doc {
+    pub fn join(self, mut ds: impl Iterator<Item = Doc>) -> Doc {
+        let mut nds = vec![];
+        for d in ds {
+            nds.push(d);
+            nds.push(self.clone());
+        }
+        if nds.is_empty() {
+            text("")
+        } else {
+            nds.pop();
+            Doc::Lines(nds)
+        }
+    }
+
     pub fn indent(self) -> Doc {
         Doc::Indent(Box::new(self))
     }
@@ -55,7 +81,6 @@ impl Doc {
         Ok(())
     }
 }
-
 
 impl fmt::Display for Doc {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

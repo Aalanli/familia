@@ -1,0 +1,17 @@
+
+type T = {
+    a: i32, 
+    b: i32
+}
+
+type R = {a: T, b: i32}
+
+fn foo(a: T, b: R): i32 {
+    return (a.a + b.a.b);
+}
+
+fn main() {
+    let a = {a: 1, b: 2};
+    let b = {a: {a: 3, b: 4}, b: 5};
+    let c = foo(a, b);
+}

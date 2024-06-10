@@ -1,6 +1,6 @@
+use crate::ast::AST;
 use anyhow::Result;
 use lalrpop_util::lalrpop_mod;
-use crate::ast::AST;
 
 lalrpop_mod!(pub familia);
 
@@ -9,7 +9,6 @@ pub fn parse(program: &str) -> Result<AST> {
         Err(anyhow::anyhow!("parse error"))
     } else {
         Ok(familia::ASTParser::new().parse(program).unwrap())
-    
     }
 }
 
@@ -27,7 +26,8 @@ mod parse_test {
                 b: i32
             }
         ",
-        ).unwrap();
+        )
+        .unwrap();
         // fn decl
         parse(
             "\
@@ -38,7 +38,8 @@ mod parse_test {
                 return (a.a.a + b.b);
             }
         ",
-        ).unwrap();
+        )
+        .unwrap();
         // fn call
         parse(
             "\
@@ -46,6 +47,7 @@ mod parse_test {
                 foo({a: {a: 1, b: 2}, b: {a: 3, b: 4}}, {a: 5, b: 6});
             }
         ",
-        ).unwrap();
+        )
+        .unwrap();
     }
 }
