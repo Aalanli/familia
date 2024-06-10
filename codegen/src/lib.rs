@@ -107,6 +107,10 @@ impl<'ctx, 'ir> CodeGen<'ctx, 'ir> {
                 let value = self.context.i32_type().const_int(*value as u64, false);
                 arg_map.insert(op.var, value.into());
             }
+            ir::OPKind::Return { value } => {
+                let value = arg_map[value];
+                self.builder.build_return(Some(&value)).unwrap();
+            }
             _ => {}
         }
     }

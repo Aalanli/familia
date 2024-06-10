@@ -502,6 +502,10 @@ impl AstToIR {
                 }
                 ast::Stmt::ReturnStmt { expr } => {
                     self.expr(var_scope, expr, &mut ops)?;
+                    let return_op = self.ir.new_op(OPKind::Return {
+                        value: self.ir.get_op_var(*ops.last().unwrap()),
+                    });
+                    ops.push(return_op);
                 }
             }
         }
