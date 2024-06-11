@@ -6,14 +6,10 @@ use std::{cell::Ref, collections::HashMap};
 
 use anyhow::{Error, Result};
 
-// mod ir;
 mod ir_kinds;
 mod registry;
 
-pub trait ID: Copy + Eq + Hash {
-    type Node;
-}
-
+pub use ir_kinds::*;
 
 // pub use ir::ast_to_ir;
 // pub use ir::{
