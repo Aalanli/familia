@@ -1,15 +1,15 @@
-use crate::ast::AST;
+use crate::ast::{LexError, Lexer, Loc, Span, Tok, AST};
+
 use anyhow::Result;
-use lalrpop_util::lalrpop_mod;
+use lalrpop_util::{lalrpop_mod, ParseError};
 
 lalrpop_mod!(pub familia);
 
-pub fn parse(program: &str) -> Result<AST> {
-    if let Err(_) = familia::ASTParser::new().parse(program) {
-        Err(anyhow::anyhow!("parse error"))
-    } else {
-        Ok(familia::ASTParser::new().parse(program).unwrap())
-    }
+type Error = ParseError<Loc, Tok, LexError>;
+
+pub fn parse(program: &str) -> Result<AST, Error> {
+    let lexer = Lexer::new(program.chars());
+    familia::ASTParser::new().parse(lexer)
 }
 
 #[cfg(test)]
@@ -49,5 +49,15 @@ mod parse_test {
         ",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn test_fail() {
+        let err = parse("\
+            type T = {
+                a: i32,
+                b: i32
+        ").unwrap_err();
+        println!("{:?}", err);
     }
 }

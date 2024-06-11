@@ -1,84 +1,99 @@
-use std::rc::Rc;
-
 use std::collections::HashMap;
 
+mod lexer;
+
 pub mod ptr;
+pub use lexer::{Symbol, Lexer, LexError, Ident, Loc, Span, Tok};
 pub use ptr::P;
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct Symbol {
-    name: Rc<str>,
-}
 
-impl Symbol {
-    pub fn from_str(s: &str) -> Self {
-        Symbol { name: Rc::from(s) }
-    }
-
-    pub fn view(&self) -> &str {
-        &*self.name
-    }
-}
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Var {
-    pub name: Symbol,
+    pub name: Ident,
     pub ty: Option<Type>,
+    pub span: Span,
 }
 
-#[derive(Clone)]
-pub enum Type {
+#[derive(Clone, Debug)]
+pub struct Type {
+    pub kind: TypeKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum TypeKind {
     Void,
     I32,
-    Struct { fields: HashMap<Symbol, Type> },
-    Symbol(Symbol),
+    Struct { fields: Vec<Var> },
+    Symbol(Path),
 }
 
-impl Type {
-    pub fn from_var(vars: Vec<Var>) -> Type {
-        let mut map = HashMap::new();
-        for v in vars {
-            map.insert(v.name, v.ty.unwrap());
-        }
-        Type::Struct { fields: map }
-    }
-}
-
+#[derive(Clone, Debug)]
 pub struct AST {
     pub decls: Vec<Decl>,
 }
 
-pub enum Decl {
+#[derive(Clone, Debug)]
+pub struct Decl {
+    pub kind: DeclKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum DeclKind {
     TypeDecl {
-        name: Symbol,
+        name: Ident,
         decl: Type,
     },
     FnDecl {
-        name: Symbol,
+        name: Ident,
         args: Vec<Var>,
         ty: Type,
     },
     FnImpl {
-        name: Symbol,
+        name: Ident,
         args: Vec<Var>,
         ty: Type,
         body: Vec<Stmt>,
     },
+    ClassImpl {
+        name: Ident,
+        sub_decls: Vec<Decl>,
+    }
 }
 
-pub enum Stmt {
+#[derive(Clone, Debug)]
+pub struct Stmt {
+    pub kind: StmtKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum StmtKind {
     LetStmt { var: Var, expr: Expr },
     ExprStmt { expr: Expr },
     // AssignStmt { lhs: Var, rhs: Expr },
     ReturnStmt { expr: Expr },
 }
 
-#[derive(Clone)]
-pub enum Expr {
+#[derive(Clone, Debug)]
+pub struct Expr {
+    pub kind: ExprKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum ExprKind {
     Var(Var),
     IntLit(i32),
-    GetAttr { exp: P<Expr>, sym: Symbol },
+    GetAttr { exp: P<Expr>, sym: Ident },
     Add { lhs: P<Expr>, rhs: P<Expr> },
-    Call { symbol: Symbol, args: Vec<Expr> },
-    Struct { args: Vec<(Symbol, Expr)> },
+    Call { path: Path, args: Vec<Expr> },
+    Struct { args: Vec<(Ident, Expr)> },
+}
+
+#[derive(Clone, Debug)]
+pub struct Path {
+    pub path: Vec<Ident>,
+    pub span: Span,
 }

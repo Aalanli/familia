@@ -2,6 +2,8 @@ use std::cell::{Cell, Ref, RefCell};
 use std::collections::HashMap;
 use std::hash::Hash;
 
+use super::registry;
+
 pub trait ID: Copy + Eq + Hash {
     type Node;
 }

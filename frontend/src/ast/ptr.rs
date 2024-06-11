@@ -1,7 +1,7 @@
 use std::ops::Deref;
 use std::rc::Rc;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct P<T: ?Sized> {
     data: Rc<T>,
 }

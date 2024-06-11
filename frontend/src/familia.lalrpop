@@ -1,26 +1,44 @@
 use std::str::FromStr;
-use crate::ast::{Expr, Stmt, Decl, AST, Type, Var, Symbol, P, self};
+use crate::ast::{Loc, Ident, Tok, LexError};
+use crate::ast::{
+    Expr, ExprKind, 
+    Stmt, StmtKind, 
+    Decl, DeclKind, 
+    AST, 
+    Type, TypeKind, 
+    Var, 
+    P, 
+    Path,
+    self
+};
+
 
 grammar;
 
 pub AST : AST = {<d:Decl*> => AST { decls: d }, }
 
 pub Decl : Decl = {
-    "type" <name:Ident> "=" <decl:Type> => Decl::TypeDecl { name, decl },
+    <lloc:@L> "type" <name:Ident> "=" <decl:Type> <rloc:@L> => {
+        let kind = DeclKind::TypeDecl { name, decl }
+        Decl { kind, span: lloc.span(rloc) }
+    },
     <decl:FnDecl> => decl,
-    <decl:FnDecl> <body:StmtBody> => {
-        let Decl::FnDecl { name, args, ty } = decl else { unreachable!() };
-        Decl::FnImpl {
+    <lloc:@L> <decl:FnDecl> <body:StmtBody> <rloc:@L> => {
+        let DeclKind::FnDecl { name, args, ty } = decl.kind else { unreachable!() };
+        let kind = DeclKind::FnImpl {
             name, args, ty, body
-        }
+        };
+        Decl { kind, span: lloc.span(rloc) }
     }
 }
 
 pub FnDecl : Decl = {
-    "fn" <name:Ident> "(" <args:Comma<Var>> ")" <ret:(":" <Type>)?> => {
-        Decl::FnDecl {
-            name, args, ty:ret.map_or(Type::Void, |x| x)
-        }
+    <lloc:@L> "fn" <name:Ident> "(" <args:Comma<Var>> ")" <tlloc:@L> <ret:(":" <Type>)?> <rloc:@L> => {
+        let temp_void = Type { kind: TypeKind::Void, span: tlloc.span(rloc) };
+        let kind = DeclKind::FnDecl {
+            name, args, ty:ret.map_or(temp_void, |x| x)
+        };
+        Decl { kind, span: lloc.span(rloc) }
     }
 }
 
@@ -28,28 +46,51 @@ pub StmtBody: Vec<Stmt> = {
     "{" <stmts:Stmt*> "}" => stmts,
 }
 
-pub Stmt: Stmt = {
-    "let" <v:Var> "=" <e:Expr> ";" => Stmt::LetStmt { var:v, expr:e },
-    <e:Expr> ";" => Stmt::ExprStmt { expr:e },
-//    <lhs:UnTypedVar> "=" <rhs:Expr> ";" => Stmt::AssignStmt { lhs, rhs },
-    "return" <expr:Expr> ";" => Stmt::ReturnStmt { expr } 
+pub Stmt : Stmt = {
+    <lloc:@L> <kind:StmtKind> <rloc:@L> => Stmt { kind, span: lloc.span(rloc) },
 }
 
-pub Expr: Expr = {
-    <n:Num> => Expr::IntLit(n),
-    <v:Var> => Expr::Var(v),
-    <e:Expr> "." <a:Ident> => Expr::GetAttr { exp: P(e), sym: a },
-    "(" <l:Expr> "+" <r:Expr> ")" => Expr::Add { lhs:P(l), rhs:P(r) },
-    <c:Ident> "(" <args:Comma<Expr>> ")" => Expr::Call { symbol:c, args },
-    "{" <args:Comma<(<Ident> ":" <Expr>)>> "}" => Expr::Struct { args },
+StmtKind: StmtKind = {
+    "let" <v:Var> "=" <e:Expr> ";" => StmtKind::LetStmt { var:v, expr:e },
+    <e:Expr> ";" => StmtKind::ExprStmt { expr:e },
+//    <lhs:UnTypedVar> "=" <rhs:Expr> ";" => StmtKind::AssignStmt { lhs, rhs },
+    "return" <expr:Expr> ";" => StmtKind::ReturnStmt { expr } 
 }
 
-pub Type: Type = {
-    "i32" => Type::I32,
-    "{" <v:Comma<TypeVar>> "}" => {
-        Type::from_var(v)
+pub Expr : Expr = {
+    <lloc:@L> <kind:ExprKind> <rloc:@L> => {
+        Expr { kind, span: lloc.span(rloc) }
     },
-    <s: Ident> => Type::Symbol(s)
+}
+
+ExprKind: ExprKind = {
+    <n:Int> => ExprKind::IntLit(n),
+    <v:Var> => ExprKind::Var(v),
+    <e:Expr> "." <a:Ident> => ExprKind::GetAttr { exp: P(e), sym: a },
+    "(" <l:Expr> "+" <r:Expr> ")" => ExprKind::Add { lhs:P(l), rhs:P(r) },
+    <c:Path> "(" <args:Comma<Expr>> ")" => ExprKind::Call { path:c, args },
+    "{" <args:Comma<(<Ident> ":" <Expr>)>> "}" => ExprKind::Struct { args },
+}
+
+pub Type : Type = {
+    <lloc:@L> <kind:TypeKind> <rloc:@L> => {
+        Type { kind, span: lloc.span(rloc) }
+    },
+}
+
+TypeKind: TypeKind = {
+    "i32" => TypeKind::I32,
+    "{" <fields:Comma<TypeVar>> "}" => {
+        TypeKind::Struct { fields }
+    },
+    <s:Path> => TypeKind::Symbol(s)
+}
+
+pub Path: Path = {
+    <lloc:@L> <mut v:(<Ident> "::")*> <e:Ident> <rloc:@L> => {
+        v.push(e);
+        Path { path: v, span: lloc.span(rloc) }
+    }
 }
 
 pub Var: Var = {
@@ -57,12 +98,12 @@ pub Var: Var = {
     <v:TypeVar> => v
 }
 
-UnTypedVar : Var = <v:Ident> => Var { name : v, ty: None };
-TypeVar : Var = <v:Ident> ":" <t:Type> => Var { name: v, ty: Some(t) };
+UnTypedVar : Var = <lloc:@L> <v:Ident> <rloc:@L> => Var { name : v, ty: None, span: lloc.span(rloc) };
+TypeVar : Var = <lloc:@L> <v:Ident> ":" <t:Type> <rloc:@L> => Var { name: v, ty: Some(t), span: lloc.span(rloc) };
 
 
-Comma<T>: Vec<T> = { // (1)
-    <mut v:(<T> ",")*> <e:T?> => match e { // (2)
+Comma<T>: Vec<T> = {
+    <mut v:(<T> ",")*> <e:T?> => match e {
         None => v,
         Some(e) => {
             v.push(e);
@@ -71,5 +112,30 @@ Comma<T>: Vec<T> = { // (1)
     }
 };
 
-Num: i32 = <s:r"[0-9]+"> => i32::from_str(s).unwrap();
-Ident: Symbol = <s:r"[_a-zA-Z][_a-zA-Z0-9]*"> => Symbol::from_str(s);
+
+extern {
+    type Location = Loc;
+    type Error = LexError;
+
+    enum Tok {
+        "i32" => Tok::I32,
+        "class" => Tok::Class,
+        "type" => Tok::Type,
+        "fn" => Tok::Fn,
+        "let" => Tok::Let,
+        "return" => Tok::Return,
+        "+" => Tok::Plus,
+        "=" => Tok::Equal,
+        "." => Tok::Dot,
+        "(" => Tok::LParen,
+        ")" => Tok::RParen,
+        "{" => Tok::LBrace,
+        "}" => Tok::RBrace,
+        ":" => Tok::Colon,
+        "::" => Tok::ColonAcc,
+        ";" => Tok::SemiColon,
+        "," => Tok::Comma,
+        Ident => Tok::Ident(<Ident>),
+        Int => Tok::Int(<i32>)
+    }
+}
