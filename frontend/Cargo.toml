@@ -11,3 +11,4 @@ lalrpop = "0.20.2"
 lalrpop-util = { version = "0.20.2", features = ["lexer", "unicode"] }
 anyhow = "1.0.86"
 itertools = "0.13.0"
+either = "1.12.0"

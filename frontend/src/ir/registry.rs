@@ -9,50 +9,54 @@ pub struct NodeID {
 }
 
 pub struct Registry<T: ?Sized> {
-    data: HashMap<u32, Box<T>>,
+    data: RefCell<HashMap<u32, Box<T>>>,
     id: Cell<u32>,
-    // mark as not syncable
-    _marker: std::marker::PhantomData<*const ()>,
 }
 
 
 impl<T> Registry<T> {
     pub fn new() -> Self {
         Registry {
-            data: HashMap::new(),
+            data: RefCell::new(HashMap::new()),
             id: Cell::new(0),
-            _marker: std::marker::PhantomData,
         }
     }
 
     pub fn insert(&self, value: T) -> NodeID {
-        let map = &self.data as *const HashMap<u32, Box<T>> as *mut HashMap<u32, Box<T>>;
         let id = self.id.get();
-        unsafe { // this makes it unsafe to sync
-            (*map).insert(id, Box::new(value));
-        }
+        self.data.borrow_mut().insert(id, Box::new(value));
         self.id.set(id + 1);
         NodeID { id }
     }
 
     pub fn get(&self, id: NodeID) -> Option<&T> {
-        self.data.get(&id.id).map(|x| &(**x))
+        let data = &*self.data.borrow();
+        if let Some(ptr) = data.get(&id.id).map(|x| x) {
+            // this is safe because we return a reference to the heap, whose lifetime is the same as the registry
+            Some(unsafe { &*(ptr.as_ref() as *const T) })
+        } else {
+            None
+        }
     }
 
     pub fn get_mut(&mut self, id: NodeID) -> Option<&mut T> {
-        self.data.get_mut(&id.id).map(|x| &mut (**x))
+        let data = &mut *self.data.borrow_mut();
+        if let Some(ptr) = data.get_mut(&id.id).map(|x| x) {
+            Some(unsafe { &mut *(ptr.as_mut() as *mut T) })
+        } else {
+            None
+        }
     }
 
-    pub fn pop(&mut self, id: NodeID) -> Option<T> {
-        self.data.remove(&id.id).map(|x| *x)
-    }
+    // pub fn pop(&mut self, id: NodeID) -> Option<T> {
+    //     self.data.borrow_mut().remove(&id.id).map(|x| *x)
+    // }
 
     pub fn iter(&self) -> impl Iterator<Item = NodeID> {
-        self.data.keys().map(|id| NodeID { id: *id }).collect::<Vec<_>>().into_iter()
+        self.data.borrow().keys().map(|id| NodeID { id: *id }).collect::<Vec<_>>().into_iter()
     }
 }
 
-unsafe impl<T: Send> Send for Registry<T> {}
 
 pub struct UniqueRegistry<T> {
     registry: Registry<T>,
@@ -88,12 +92,12 @@ mod test_registry {
 
     #[test]
     fn test_registry() {
-        let mut reg = Registry::new();
+        let reg = Registry::new();
         let id1 = reg.insert(1);
         let id2 = reg.insert(2);
         assert_eq!(reg.get(id1), Some(&1));
         assert_eq!(reg.get(id2), Some(&2));
-        assert_eq!(reg.pop(id1), Some(1));
+        // assert_eq!(reg.pop(id1), Some(1));
         assert_eq!(reg.get(id1), None);
         assert_eq!(reg.get(id2), Some(&2));
     }
@@ -106,5 +110,21 @@ mod test_registry {
         assert_eq!(reg.get(id1), Some(&1));
         assert_eq!(reg.get(id2), Some(&2));
         assert_eq!(reg.insert(1), id1);
+    }
+
+    #[test]
+    fn test_registry_mut() {
+        let mut reg = Registry::new();
+        let mut ids = vec![];
+        for i in 0..10 {
+            let id = reg.insert(i);
+            ids.push(id);
+            *reg.get_mut(id).unwrap() += 1;
+        }
+
+        for (i, id) in ids.into_iter().enumerate() {
+            reg.insert(1);
+            assert_eq!(*reg.get(id).unwrap(), i + 1);
+        }
     }
 }

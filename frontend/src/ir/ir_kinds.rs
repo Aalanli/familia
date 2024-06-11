@@ -5,8 +5,8 @@ pub struct IR {
     symbols: UniqueRegistry<Symbol>,
     paths: UniqueRegistry<Path>,
     types: UniqueRegistry<Type>,
-    vars: Registry<Var>,
 
+    vars: Registry<Var>,
     type_decls: Registry<TypeDecl>,
     func_decls: Registry<FuncImpl>,
     class_decls: Registry<ClassImpl>,
