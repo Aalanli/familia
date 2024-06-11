@@ -19,7 +19,7 @@ pub AST : AST = {<d:Decl*> => AST { decls: d }, }
 
 pub Decl : Decl = {
     <lloc:@L> "type" <name:Ident> "=" <decl:Type> <rloc:@L> => {
-        let kind = DeclKind::TypeDecl { name, decl }
+        let kind = DeclKind::TypeDecl { name, decl };
         Decl { kind, span: lloc.span(rloc) }
     },
     <decl:FnDecl> => decl,
