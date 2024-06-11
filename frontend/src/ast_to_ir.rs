@@ -20,3 +20,6 @@ pub fn check_basic(ast: &ast::AST) -> Result<(), AstError> {
     }
     Ok(())
 }
+
+type PathMap<'a> = HashMap<&'a ast::Path, &'a ast::Decl>;
+
