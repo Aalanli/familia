@@ -1,9 +1,7 @@
-use std::collections::HashMap;
-
 mod lexer;
+pub use lexer::{Symbol, Lexer, LexError, Ident, Loc, Span, Tok};
 
 pub mod ptr;
-pub use lexer::{Symbol, Lexer, LexError, Ident, Loc, Span, Tok};
 pub use ptr::P;
 
 

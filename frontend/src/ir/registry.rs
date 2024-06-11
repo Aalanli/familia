@@ -8,12 +8,13 @@ pub struct NodeID {
     pub id: u32,
 }
 
-pub struct Registry<T> {
+pub struct Registry<T: ?Sized> {
     data: HashMap<u32, Box<T>>,
     id: Cell<u32>,
     // mark as not syncable
     _marker: std::marker::PhantomData<*const ()>,
 }
+
 
 impl<T> Registry<T> {
     pub fn new() -> Self {
@@ -45,10 +46,13 @@ impl<T> Registry<T> {
     pub fn pop(&mut self, id: NodeID) -> Option<T> {
         self.data.remove(&id.id).map(|x| *x)
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = NodeID> {
+        self.data.keys().map(|id| NodeID { id: *id }).collect::<Vec<_>>().into_iter()
+    }
 }
 
 unsafe impl<T: Send> Send for Registry<T> {}
-
 
 pub struct UniqueRegistry<T> {
     registry: Registry<T>,

@@ -4,9 +4,7 @@ use std::hash::Hash;
 
 use super::registry;
 
-pub trait ID: Copy + Eq + Hash {
-    type Node;
-}
+
 
 pub struct IR {
     // this is a little iffy, we should separate these immutable fields into a separate structure

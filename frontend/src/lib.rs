@@ -4,5 +4,5 @@ mod parser;
 mod printer;
 
 pub use parser::parse;
-pub use ir::ast_to_ir;
+// pub use ir::ast_to_ir;
 
