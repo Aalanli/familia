@@ -1,10 +1,50 @@
 use std::collections::HashMap;
+use std::hash::Hash;
 
 use either::{Either, Left, Right};
 
 use crate::ast;
 use crate::ast::{Span, Visitor};
 use crate::ir;
+
+struct PointerHashKey<'a, K> {
+    key: &'a K,
+}
+
+struct PointerHashMap<'a, K, V> {
+    map: HashMap<PointerHashKey<'a, K>, V>,
+}
+
+impl<'a, K> Hash for PointerHashKey<'a, K> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        (self.key as *const K).hash(state);
+    }
+}
+
+impl<'a, K> PartialEq for PointerHashKey<'a, K> {
+    fn eq(&self, other: &Self) -> bool {
+        self.key as *const K == other.key as *const K
+    }
+}
+
+impl<'a, K> Eq for PointerHashKey<'a, K> {}
+
+impl<'a, K, V> PointerHashMap<'a, K, V> {
+    fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
+
+    fn insert(&mut self, key: &'a K, value: V) -> Option<V> {
+        self.map.insert(PointerHashKey { key }, value)
+    }
+
+    fn get(&self, key: &'a K) -> Option<&V> {
+        self.map.get(&PointerHashKey { key })
+    }
+}
+
 
 #[derive(Debug)]
 pub enum AstError<'a> {
@@ -29,7 +69,7 @@ fn check_basic(ast: &ast::AST) -> Result<(), AstError> {
     Ok(())
 }
 
-type PathMap<'a> = HashMap<&'a ast::Path, &'a ast::Decl>;
+type PathMap<'a> = PointerHashMap<'a, ast::Path, &'a ast::Decl>;
 
 struct GetPath<'a> {
     paths: Vec<&'a ast::Path>,
@@ -87,7 +127,7 @@ fn find_path<'a>(ast: &'a ast::Decl, path: &'a ast::Path, pindex: usize) -> Resu
 
 // every path must be fully qualified for now
 fn check_path(ast: &ast::AST) -> Result<PathMap, AstError> {
-    let mut path_map = HashMap::new();
+    let mut path_map = PointerHashMap::new();
     let mut visitor = GetPath { paths: Vec::new() };
     visitor.visit_ast(ast);
     

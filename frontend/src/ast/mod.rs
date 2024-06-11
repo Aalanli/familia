@@ -1,5 +1,4 @@
 mod lexer;
-use std::hash::Hash;
 
 pub use lexer::{Symbol, Lexer, LexError, Ident, Loc, Span, Tok};
 
@@ -96,12 +95,6 @@ pub enum ExprKind {
 pub struct Path {
     pub path: Vec<Ident>,
     pub span: Span,
-}
-
-impl<'a> Hash for &'a Path {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        (self as *const Self).hash(state);
-    }
 }
 
 impl Path {
