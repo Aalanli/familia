@@ -1,5 +1,7 @@
 mod lexer;
 
+use std::fmt::Display;
+
 pub use lexer::{Symbol, Lexer, LexError, Ident, Loc, Span, Tok};
 
 pub mod ptr;
@@ -61,6 +63,17 @@ pub enum DeclKind {
     }
 }
 
+impl Decl {
+    pub fn name(&self) -> &Ident {
+        match &self.kind {
+            DeclKind::TypeDecl { name, .. } => name,
+            DeclKind::FnDecl { name, .. } => name,
+            DeclKind::FnImpl { name, .. } => name,
+            DeclKind::ClassImpl { name, .. } => name,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Stmt {
     pub kind: StmtKind,
@@ -103,6 +116,17 @@ impl Path {
     }
 }
 
+impl Display for Path {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, ident) in self.path.iter().enumerate() {
+            write!(f, "{}", ident)?;
+            if i != self.path.len() - 1 {
+                write!(f, "::")?;
+            }
+        }
+        Ok(())
+    }
+}
 
 pub trait Visitor<'a>: Sized {
     fn visit_ast(&mut self, ast: &'a AST) {

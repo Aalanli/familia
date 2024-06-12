@@ -1,11 +1,11 @@
-use crate::ast::{LexError, Lexer, Loc, Span, Tok, AST};
+use crate::ast::{LexError, Lexer, Loc, Tok, AST};
 
 use anyhow::Result;
 use lalrpop_util::{lalrpop_mod, ParseError};
 
 lalrpop_mod!(pub familia);
 
-type Error = ParseError<Loc, Tok, LexError>;
+pub type Error = ParseError<Loc, Tok, LexError>;
 
 pub fn parse(program: &str) -> Result<AST, Error> {
     let lexer = Lexer::new(program.chars());
@@ -49,15 +49,52 @@ mod parse_test {
         ",
         )
         .unwrap();
+
+        parse("fn t(a:i32):i32").unwrap();
+    }
+
+    #[test]
+    fn test_parse_class() {
+        parse(
+            "\
+            type T = {a: i32, b: i32}
+            type R = {a: T, b: T}
+            type S = {a: R, b: R}
+            class C {
+                type T = {a: i32, b: i32}
+
+                fn foo(a: S, b: R): i32 {
+                    return (a.a.a + b.b.b);
+                }
+
+                fn bar(a: i32): i32 {
+                    return (a + 2);
+                }
+            }
+        ",
+        )
+        .unwrap();
     }
 
     #[test]
     fn test_fail() {
-        let err = parse("\
+        parse("\
             type T = {
                 a: i32,
                 b: i32
         ").unwrap_err();
-        println!("{:?}", err);
+            
+        parse("\
+            type T = {
+                a: i32,
+                b: i32
+            }
+            type R = {a: T, b: T}
+            
+            fn foo(a: R, b: T): i32 {
+                return (a.a.a + b.b);
+        ").unwrap_err();
+
+        parse("fn t(a::i32):i32").unwrap_err();
     }
 }

@@ -7,10 +7,12 @@ use crate::ast;
 use crate::ast::{Span, Visitor};
 use crate::ir;
 
+#[derive(Debug, Clone)]
 struct PointerHashKey<'a, K> {
     key: &'a K,
 }
 
+#[derive(Debug, Clone)]
 struct PointerHashMap<'a, K, V> {
     map: HashMap<PointerHashKey<'a, K>, V>,
 }
@@ -56,6 +58,7 @@ pub enum AstError<'a> {
     }
 }
 
+// disallow nested classes for now
 fn check_basic(ast: &ast::AST) -> Result<(), AstError> {
     for decl in ast.decls.iter() {
         if let ast::DeclKind::ClassImpl { sub_decls, .. } = &decl.kind {
@@ -148,3 +151,31 @@ fn check_path(ast: &ast::AST) -> Result<PathMap, AstError> {
     Ok(path_map)
 }
 
+#[cfg(test)]
+mod ast_to_ir_test {
+    use super::*;
+    use crate::parse;
+
+    #[test]
+    fn test_check_path() {
+        let ast = parse(
+            "\
+            class A {
+                fn foo(a: i32): i32 { return (a + 1); }
+                class B {
+                    fn bar(a: i32): i32 { return (a + 2); }
+                }
+            }
+            fn main() {
+                A::foo(1);
+                A::B::bar(2);
+            }
+            "
+        ).unwrap();
+
+        let _t = check_path(&ast).unwrap();
+        // for (k, v) in _t.map.iter() {
+        //     println!("{} -> {}", k.key, v.name());
+        // }
+    }
+}

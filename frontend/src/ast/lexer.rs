@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, rc::Rc};
+use std::{collections::VecDeque, fmt::Display, rc::Rc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Span {
@@ -51,6 +51,12 @@ impl Symbol {
 pub struct Ident {
     pub name: Symbol,
     pub span: Span,
+}
+
+impl Display for Ident {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name.view())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

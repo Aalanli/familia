@@ -18,27 +18,36 @@ grammar;
 pub AST : AST = {<d:Decl*> => AST { decls: d }, }
 
 pub Decl : Decl = {
-    <lloc:@L> "type" <name:Ident> "=" <decl:Type> <rloc:@L> => {
-        let kind = DeclKind::TypeDecl { name, decl };
+    <lloc:@L> <kind:DeclKind> <rloc:@L> => {
         Decl { kind, span: lloc.span(rloc) }
     },
+}
+
+DeclKind : DeclKind = {
+    "type" <name:Ident> "=" <decl:Type> => {
+        DeclKind::TypeDecl { name, decl }
+    },
     <decl:FnDecl> => decl,
-    <lloc:@L> <decl:FnDecl> <body:StmtBody> <rloc:@L> => {
-        let DeclKind::FnDecl { name, args, ty } = decl.kind else { unreachable!() };
+    <decl:FnDecl> <body:StmtBody> => {
+        let DeclKind::FnDecl { name, args, ty } = decl else { unreachable!() };
         let kind = DeclKind::FnImpl {
             name, args, ty, body
         };
-        Decl { kind, span: lloc.span(rloc) }
+        kind
+    },
+    "class" <name:Ident> "{" <sub_decls:Decl*> "}" => {
+        DeclKind::ClassImpl { name, sub_decls }
     }
+
 }
 
-pub FnDecl : Decl = {
-    <lloc:@L> "fn" <name:Ident> "(" <args:Comma<Var>> ")" <tlloc:@L> <ret:(":" <Type>)?> <rloc:@L> => {
+FnDecl : DeclKind = {
+    "fn" <name:Ident> "(" <args:Comma<Var>> ")" <tlloc:@L> <ret:(":" <Type>)?> <rloc:@L> => {
         let temp_void = Type { kind: TypeKind::Void, span: tlloc.span(rloc) };
         let kind = DeclKind::FnDecl {
             name, args, ty:ret.map_or(temp_void, |x| x)
         };
-        Decl { kind, span: lloc.span(rloc) }
+        kind
     }
 }
 
