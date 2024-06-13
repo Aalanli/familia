@@ -3,7 +3,9 @@ use std::cell::RefCell;
 use std::{cell::Cell, collections::HashMap};
 use std::hash::Hash;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+use anyhow::{Result, anyhow};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct NodeID {
     pub id: u32,
 }
@@ -14,17 +16,16 @@ pub struct Registry<T: ?Sized> {
 }
 
 
-impl<T> Registry<T> {
+impl<T: ?Sized> Registry<T> {
     pub fn new() -> Self {
         Registry {
             data: RefCell::new(HashMap::new()),
-            id: Cell::new(0),
+            id: Cell::new(1), // treat 0 as None, or empty, since Default for NodeID is 0
         }
     }
 
-    pub fn insert(&self, value: T) -> NodeID {
+    pub fn temporary_id(&self) -> NodeID {
         let id = self.id.get();
-        self.data.borrow_mut().insert(id, Box::new(value));
         self.id.set(id + 1);
         NodeID { id }
     }
@@ -58,6 +59,33 @@ impl<T> Registry<T> {
 }
 
 
+impl<T> Registry<T> {
+    pub fn insert_with(&self, id: NodeID, value: T) {
+        self.data.borrow_mut().insert(id.id, Box::new(value));
+    }
+
+    pub fn insert(&self, value: T) -> NodeID {
+        let id = self.id.get();
+        self.data.borrow_mut().insert(id, Box::new(value));
+        self.id.set(id + 1);
+        NodeID { id }
+    }
+}
+
+impl<T: ?Sized> Registry<T> {
+    pub fn insert_with_boxed(&self, id: NodeID, value: Box<T>) {
+        self.data.borrow_mut().insert(id.id, value);
+    }
+
+    pub fn insert_boxed(&self, value: Box<T>) -> NodeID {
+        let id = self.id.get();
+        self.data.borrow_mut().insert(id, value);
+        self.id.set(id + 1);
+        NodeID { id }
+    }
+}
+
+
 pub struct UniqueRegistry<T> {
     registry: Registry<T>,
     rev: RefCell<HashMap<T, NodeID>>,
@@ -78,6 +106,15 @@ impl<T: Clone + Hash + Eq> UniqueRegistry<T> {
         let id = self.registry.insert(value.clone());
         self.rev.borrow_mut().insert(value, id);
         id
+    }
+
+    pub fn insert_with(&self, id: NodeID, value: T) -> Result<()> {
+        if self.rev.borrow().contains_key(&value) {
+            return Err(anyhow!("Value already exists in registry"));
+        }
+        self.rev.borrow_mut().insert(value.clone(), id);
+        self.registry.insert_with(id, value);
+        Ok(())
     }
 
     pub fn get(&self, id: NodeID) -> Option<&T> {

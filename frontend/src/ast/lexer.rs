@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, fmt::Display, rc::Rc};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct Span {
     pub lhs: Loc,
     pub rhs: Loc,
@@ -37,6 +37,12 @@ pub struct Symbol {
     name: Rc<str>,
 }
 
+impl Default for Symbol {
+    fn default() -> Self {
+        Symbol { name: Rc::from("") }
+    }
+}
+
 impl Symbol {
     pub fn from_str(s: &str) -> Self {
         Symbol { name: Rc::from(s) }
@@ -47,7 +53,7 @@ impl Symbol {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Ident {
     pub name: Symbol,
     pub span: Span,

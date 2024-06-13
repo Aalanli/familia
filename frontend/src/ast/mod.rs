@@ -30,11 +30,6 @@ pub enum TypeKind {
 }
 
 #[derive(Clone, Debug)]
-pub struct AST {
-    pub decls: Vec<Decl>,
-}
-
-#[derive(Clone, Debug)]
 pub struct Decl {
     pub kind: DeclKind,
     pub span: Span,
@@ -60,6 +55,12 @@ pub enum DeclKind {
     ClassImpl {
         name: Ident,
         sub_decls: Vec<Decl>,
+    },
+    Module {
+        name: Ident,
+        file: Option<String>,
+        top: bool,
+        decls: Vec<Decl>,
     }
 }
 
@@ -70,6 +71,7 @@ impl Decl {
             DeclKind::FnDecl { name, .. } => name,
             DeclKind::FnImpl { name, .. } => name,
             DeclKind::ClassImpl { name, .. } => name,
+            DeclKind::Module { name, .. } => name,
         }
     }
 }
@@ -129,10 +131,6 @@ impl Display for Path {
 }
 
 pub trait Visitor<'a>: Sized {
-    fn visit_ast(&mut self, ast: &'a AST) {
-        default_visit_ast(ast, self);
-    }
-
     fn visit_decl(&mut self, decl: &'a Decl) {
         default_visit_decl(decl, self);
     }
@@ -149,16 +147,10 @@ pub trait Visitor<'a>: Sized {
         default_visit_expr(expr, self);
     }
 
-    fn visit_path(&mut self, path: &'a Path);
+    fn visit_path(&mut self, path: &'a Path) {}
 
     fn visit_type(&mut self, ty: &'a Type) {
         default_visit_type(ty, self);
-    }
-}
-
-pub fn default_visit_ast<'a>(ast: &'a AST, visitor: &mut impl Visitor<'a>) {
-    for decl in &ast.decls {
-        visitor.visit_decl(decl);
     }
 }
 
@@ -185,6 +177,11 @@ pub fn default_visit_decl<'a>(decl: &'a Decl, visitor: &mut impl Visitor<'a>) {
         DeclKind::ClassImpl { sub_decls, .. } => {
             for sub_decl in sub_decls {
                 visitor.visit_decl(sub_decl);
+            }
+        }
+        DeclKind::Module { decls, .. } => {
+            for decl in decls {
+                visitor.visit_decl(decl);
             }
         }
     }

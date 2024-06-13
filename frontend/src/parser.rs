@@ -1,4 +1,4 @@
-use crate::ast::{LexError, Lexer, Loc, Tok, AST};
+use crate::ast::{LexError, Lexer, Loc, Tok, Decl};
 
 use anyhow::Result;
 use lalrpop_util::{lalrpop_mod, ParseError};
@@ -7,7 +7,7 @@ lalrpop_mod!(pub familia);
 
 pub type Error = ParseError<Loc, Tok, LexError>;
 
-pub fn parse(program: &str) -> Result<AST, Error> {
+pub fn parse(program: &str) -> Result<Decl, Error> {
     let lexer = Lexer::new(program.chars());
     familia::ASTParser::new().parse(lexer)
 }

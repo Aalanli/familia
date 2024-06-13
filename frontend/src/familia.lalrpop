@@ -4,7 +4,6 @@ use crate::ast::{
     Expr, ExprKind, 
     Stmt, StmtKind, 
     Decl, DeclKind, 
-    AST, 
     Type, TypeKind, 
     Var, 
     P, 
@@ -15,7 +14,13 @@ use crate::ast::{
 
 grammar;
 
-pub AST : AST = {<d:Decl*> => AST { decls: d }, }
+// modules are top-level for now, nested modules are to be supported later
+pub AST : Decl = {
+    <lloc:@L> <d:Decl*> <rloc:@L> => {
+        let kind = DeclKind::Module { name: Ident::default(), file: None, top: true, decls: d };
+        Decl { kind, span: lloc.span(rloc) }
+    }, 
+}
 
 pub Decl : Decl = {
     <lloc:@L> <kind:DeclKind> <rloc:@L> => {
