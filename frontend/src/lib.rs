@@ -8,8 +8,9 @@ mod printer;
 
 pub use parser::parse;
 
+#[derive(Clone, Debug)]
 pub struct Program {
-    pub file: String,
+    pub file: Option<String>,
     pub text: String,
     pub ast: ast::Decl,
 }

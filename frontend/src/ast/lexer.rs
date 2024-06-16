@@ -59,6 +59,12 @@ pub struct Ident {
     pub span: Span,
 }
 
+impl Ident {
+    pub fn get_str(&self) -> &str {
+        self.name.view()
+    }
+}
+
 impl Display for Ident {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name.view())

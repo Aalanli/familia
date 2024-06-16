@@ -99,6 +99,10 @@ impl<T: Clone + Hash + Eq> UniqueRegistry<T> {
         }
     }
 
+    pub fn contains(&self, value: &T) -> bool {
+        self.rev.borrow().contains_key(value)
+    }
+
     pub fn insert(&self, value: T) -> NodeID {
         if let Some(id) = self.rev.borrow().get(&value) {
             return *id;

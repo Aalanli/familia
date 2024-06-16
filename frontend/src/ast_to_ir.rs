@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 use anyhow::{Result, anyhow};
+use either::Either;
 
 use crate::Program;
 use crate::ast::{self, Decl};
@@ -158,6 +159,21 @@ impl<'a> ast::Visitor<'a> for CollectTypeDecl<'a> {
     }
 }
 
+struct CollectFnImpl<'a> {
+    impls: Vec<&'a ast::Decl>,
+}
+
+impl<'a> ast::Visitor<'a> for CollectFnImpl<'a> {
+    fn visit_decl(&mut self, decl: &'a ast::Decl) {
+        match &decl.kind {
+            ast::DeclKind::FnImpl { .. } => {
+                self.impls.push(decl);
+            }
+            _ => {}
+        }
+    }
+}
+
 /*
 struct CollectTypePath<'a> {
     paths: Vec<&'a ast::Path>,
@@ -203,58 +219,155 @@ fn check_circular_type_dep<'a>(ast: &'a ast::AST, path_map: PathMap<'a>) -> Resu
 }
 */
 
-// struct ASTToIR<'a> {
-//     path_map: PathMap<'a>,
-//     ast: &'a ast::AST,
-//     ty_decl_to_id: PointerHashMap<'a, ast::Decl, ir::TypeID>
-// }
+struct ASTToIR<'a> {
+    path_map: PathMap<'a>,
+    program: &'a Program,
+    ty_decl_to_id: PointerHashMap<'a, ast::Decl, ir::TypeDeclID>,
+    fn_impl_to_id: PointerHashMap<'a, ast::Decl, ir::FuncID>,
+}
 
-// impl<'a> ASTToIR<'a> {
-//     fn insert_types(&mut self, ir: &mut ir::IR) {
-//         let mut visitor = CollectTypeDecl { decls: Vec::new() };
-//         visitor.visit_ast(self.ast);
-//         for decl in visitor.decls.iter() {
-//             let id = ir.temporary_type_id();
-//             self.ty_decl_to_id.insert(*decl, id);
-//         }
+impl<'a> ASTToIR<'a> {
+    fn recursively_constuct_types(&mut self, ty: &ast::Type, ir: &mut ir::IR) -> ir::TypeKind {
+        let ty_kind;
+        match &ty.kind {
+            ast::TypeKind::Void => {
+                ty_kind = ir::TypeKind::Void;   
+            }
+            ast::TypeKind::I32 => {
+                ty_kind = ir::TypeKind::I32;
+            }
+            ast::TypeKind::Struct { fields } => {
+                let mut field_ids = Vec::new();
+                for field in fields {
+                    let fsym = ir.insert_symbol(field.name.get_str());
+                    // by the grammar, ty is always Some
+                    let fty = field.ty.as_ref().unwrap();
+                    let fty_kind = self.recursively_constuct_types(fty, ir);
+                    field_ids.push((fsym, ir.insert_type(fty_kind)));
+                }
+                ty_kind = ir::TypeKind::Struct { fields: field_ids };
+            }
+            ast::TypeKind::Symbol(path) => {
+                let decl = self.path_map.get(path).unwrap();
+                let id = self.ty_decl_to_id.get(*decl).unwrap();
+                ty_kind = ir::TypeKind::Decl { decl: *id };
+            }
+        }
+        ty_kind
+    }
+    
+    fn insert_type_decls(&mut self, ir: &mut ir::IR) {
+        let mut visitor = CollectTypeDecl { decls: Vec::new() };
+        visitor.visit_decl(&self.program.ast);
+        for decl in visitor.decls.iter() {
+            let id = ir.temporary_id();
+            self.ty_decl_to_id.insert(*decl, id);
+        }
 
-//         for decl in visitor.decls {
-//             let id = self.ty_decl_to_id.get(decl).unwrap();
-//             let ast::DeclKind::TypeDecl { decl: ty_decl, .. } = &decl.kind else { unreachable!() };
-//             // match &ty_decl.kind {
-//             //     ast::TypeKind::Void => {
-                    
-//             //     }
-//             // }
-//         }
-//     }
-// }
+        for decl in visitor.decls {
+            let id = *self.ty_decl_to_id.get(decl).unwrap();
+            let ast::DeclKind::TypeDecl { decl: ty, name } = &decl.kind else { unreachable!() };
+            let tkind = self.recursively_constuct_types(ty, ir);
+            ir.insert_with(id, ir::TypeDecl { name: ir.insert_symbol(name.name.view()), decl: ir.insert_type(tkind), span: decl.span });
+        }
+    }
 
-// #[cfg(test)]
-// mod ast_to_ir_test {
-//     use super::*;
-//     use crate::parse;
+    fn get_type(&mut self, ty: &ast::Type, ir: &mut ir::IR) -> ir::TypeID {
+        let ty_kind = self.recursively_constuct_types(ty, ir);
+        ir.insert_type(ty_kind)
+    }
 
-//     #[test]
-//     fn test_check_path() {
-//         let ast = parse(
-//             "\
-//             class A {
-//                 fn foo(a: i32): i32 { return (a + 1); }
-//                 class B {
-//                     fn bar(a: i32): i32 { return (a + 2); }
-//                 }
-//             }
-//             fn main() {
-//                 A::foo(1);
-//                 A::B::bar(2);
-//             }
-//             "
-//         ).unwrap();
+    fn get_var(&mut self, var: &ast::Var, ir: &mut ir::IR) -> ir::VarID {
+        let ty = var.ty.as_ref().map(|ty| self.get_type(ty, ir));
+        let id = ir.temporary_id();
+        let var = ir::Var { id, name: ir.insert_symbol(var.name.get_str()), ty, span: var.span };
+        ir.insert_with(id, var);
+        id
+    }
 
-//         let _t = check_path(&ast).unwrap();
-//         // for (k, v) in _t.map.iter() {
-//         //     println!("{} -> {}", k.key, v.name());
-//         // }
-//     }
-// }
+    fn insert_expr(&mut self, var_map: &mut HashMap<ir::SymbolID, ir::VarID>, ops: &mut Vec<ir::OPID>, expr: &ast::Expr, ir: &mut ir::IR) -> ir::VarID {
+        // match &expr.kind {
+            
+        // }
+        todo!()
+    }
+
+    fn insert_stmts(&mut self, var_map: &mut HashMap<ir::SymbolID, ir::VarID>, ops: &mut Vec<ir::OPID>, stmt: &ast::Stmt, ir: &mut ir::IR) {
+        let op_kind;
+        match &stmt.kind {
+            ast::StmtKind::ReturnStmt { expr } => {
+                let var = self.insert_expr(var_map, ops, expr, ir);
+                op_kind = ir::OPKind::Return { value: var };
+            }
+            ast::StmtKind::ExprStmt { expr } => {
+                let _var = self.insert_expr(var_map, ops, expr, ir);
+                return;
+            }
+            ast::StmtKind::LetStmt { var, expr } => {
+                let var_id = self.get_var(var, ir);
+                let expr_id = self.insert_expr(var_map, ops, expr, ir);
+                op_kind = ir::OPKind::Assign { lhs: var_id, rhs: expr_id };
+            }
+        }
+        let op_id = ir.temporary_id();
+        ir.insert_with(op_id, ir::OP { kind: op_kind, span: stmt.span, var: None, id: op_id });
+    }
+
+
+    fn insert_fn_decl(&mut self, ir: &mut ir::IR) {
+        let mut visitor = CollectFnImpl { impls: Vec::new() };
+        visitor.visit_decl(&self.program.ast);
+
+        for decl in visitor.impls.iter() {
+            let id = ir.temporary_id();
+            self.fn_impl_to_id.insert(*decl, id);
+        }
+
+        for decl in visitor.impls {
+            let id = *self.fn_impl_to_id.get(decl).unwrap();
+            let ast::DeclKind::FnImpl { name, args, ty, body } = &decl.kind else { unreachable!() };
+            let func_decl = ir::FuncDecl {
+                name: ir.insert_symbol(name.name.view()),
+                args: args.iter().map(|arg| (ir.insert_symbol(arg.name.get_str()), self.get_type(arg.ty.as_ref().unwrap(), ir))).collect(),
+                ret_ty: self.get_type(ty, ir),
+            };
+            let mut var_map = HashMap::new();
+            let mut ops = Vec::new();
+            for stmt in body.iter() {
+                self.insert_stmts(&mut var_map, &mut ops, stmt, ir);
+            }
+        }
+    }
+
+
+
+}
+
+#[cfg(test)]
+mod ast_to_ir_test {
+    use super::*;
+    use crate::parse;
+
+    #[test]
+    fn test_check_path() {
+        let ast = parse(
+            "\
+            class A {
+                fn foo(a: i32): i32 { return (a + 1); }
+                class B {
+                    fn bar(a: i32): i32 { return (a + 2); }
+                }
+            }
+            fn main() {
+                A::foo(1);
+                A::B::bar(2);
+            }
+            ".into(), None
+        ).unwrap();
+
+        let _t = check_path(&ast).unwrap();
+        // for (k, v) in _t.map.iter() {
+        //     println!("{} -> {}", k.key, v.name());
+        // }
+    }
+}

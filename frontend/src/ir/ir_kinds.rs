@@ -47,13 +47,12 @@ impl IR {
         I::new(id)
     }
 
-    pub fn insert_with<I: ID>(&self, id: NodeID, node: I::Node) -> I {
-        self.ir.insert_with_boxed(id, Box::new(node));
-        I::new(id)
+    pub fn insert_with<I: ID>(&self, id: I, node: I::Node) {
+        self.ir.insert_with_boxed(id.id(), Box::new(node));
     }
 
-    pub fn temporary_id(&self) -> NodeID {
-        self.ir.temporary_id()
+    pub fn temporary_id<I: ID>(&self) -> I {
+        I::new(self.ir.temporary_id())
     }
 
     // These are separate because we need hashing utility
@@ -62,8 +61,8 @@ impl IR {
         self.symbols.get(id.0)
     }
 
-    pub fn insert_symbol(&self, symbol: Symbol) -> SymbolID {
-        SymbolID(self.symbols.insert(symbol))
+    pub fn insert_symbol(&self, symbol: &str) -> SymbolID {
+        SymbolID(self.symbols.insert(Symbol { name: symbol.to_string() }))
     }
 
     pub fn get_path(&self, id: PathID) -> Option<&Path> {
@@ -79,16 +78,12 @@ impl IR {
         self.types.get(id.0)
     }
 
-    pub fn insert_type(&self, ty: Type) -> TypeID {
-        TypeID(self.types.insert(ty))
+    pub fn insert_type(&self, ty: TypeKind) -> TypeID {
+        TypeID(self.types.insert(Type{ kind: ty}))
     }
 
-    pub fn temporary_type_id(&self) -> TypeID {
-        TypeID::new(self.temporary_id())
-    }
-
-    pub fn insert_type_with_id(&self, id: TypeID, ty: Type) -> Result<()> {
-        self.types.insert_with(id.0, ty)
+    pub fn insert_type_with_id(&self, id: TypeID, ty: TypeKind) -> Result<()> {
+        self.types.insert_with(id.0, Type{ kind: ty })
     }    
 }
 
@@ -120,7 +115,6 @@ impl_id!(SymbolID, Symbol);
 
 #[derive(Clone, PartialEq, Eq, Hash, Default)]
 pub struct Symbol {
-    pub id: SymbolID,
     pub name: String,
 }
 
@@ -139,15 +133,14 @@ pub struct Var {
     pub id: VarID,
     pub name: SymbolID,
     pub ty: Option<TypeID>,
-    pub decl_ty_path: Option<PathID>,
     pub span: Span,
+    // pub decl_ty_path: Option<PathID>,
 }
 
 impl_id!(TypeID, Type);
 
 #[derive(Clone, PartialEq, Eq, Hash, Default)]
 pub struct Type {
-    pub id: TypeID,
     pub kind: TypeKind,
 }
 
@@ -155,7 +148,6 @@ impl_id!(TypeDeclID, TypeDecl);
 
 #[derive(Clone, Default)]
 pub struct TypeDecl {
-    pub id: TypeDeclID,
     pub name: SymbolID,
     pub decl: TypeID,
     pub span: Span,
@@ -166,6 +158,7 @@ pub enum TypeKind {
     I32,
     Void,
     Struct { fields: Vec<(SymbolID, TypeID)> },
+    Decl { decl: TypeDeclID },
 }
 
 impl Default for TypeKind {
@@ -196,7 +189,7 @@ impl_id!(OPID, OP);
 pub struct OP {
     pub id: OPID,
     pub kind: OPKind,
-    pub var: VarID,
+    pub var: Option<VarID>,
     pub span: Span,
 }
 
@@ -225,6 +218,10 @@ pub enum OPKind {
     Constant {
         value: i32,
     },
+    Assign {
+        lhs: VarID,
+        rhs: VarID,
+    }
 }
 
 pub struct ClassDecl {

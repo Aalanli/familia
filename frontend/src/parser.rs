@@ -1,3 +1,4 @@
+use crate::Program;
 use crate::ast::{LexError, Lexer, Loc, Tok, Decl};
 
 use anyhow::Result;
@@ -7,9 +8,10 @@ lalrpop_mod!(pub familia);
 
 pub type Error = ParseError<Loc, Tok, LexError>;
 
-pub fn parse(program: &str) -> Result<Decl, Error> {
+pub fn parse(program: String, file: Option<String>) -> Result<Program, Error> {
     let lexer = Lexer::new(program.chars());
-    familia::ASTParser::new().parse(lexer)
+    let ast = familia::ASTParser::new().parse(lexer)?;
+    Ok(Program { text: program, file, ast })
 }
 
 #[cfg(test)]
@@ -25,7 +27,7 @@ mod parse_test {
                 a: i32,
                 b: i32
             }
-        ",
+        ".into(), None
         )
         .unwrap();
         // fn decl
@@ -37,7 +39,7 @@ mod parse_test {
             fn foo(a: R, b: T): i32 {
                 return (a.a.a + b.b);
             }
-        ",
+        ".into(), None
         )
         .unwrap();
         // fn call
@@ -46,11 +48,11 @@ mod parse_test {
             fn main() {
                 foo({a: {a: 1, b: 2}, b: {a: 3, b: 4}}, {a: 5, b: 6});
             }
-        ",
+        ".into(), None
         )
         .unwrap();
 
-        parse("fn t(a:i32):i32").unwrap();
+        parse("fn t(a:i32):i32".into(), None).unwrap();
     }
 
     #[test]
@@ -71,7 +73,7 @@ mod parse_test {
                     return (a + 2);
                 }
             }
-        ",
+        ".into(), None
         )
         .unwrap();
     }
@@ -82,7 +84,7 @@ mod parse_test {
             type T = {
                 a: i32,
                 b: i32
-        ").unwrap_err();
+        ".into(), None).unwrap_err();
             
         parse("\
             type T = {
@@ -93,8 +95,8 @@ mod parse_test {
             
             fn foo(a: R, b: T): i32 {
                 return (a.a.a + b.b);
-        ").unwrap_err();
+        ".into(), None).unwrap_err();
 
-        parse("fn t(a::i32):i32").unwrap_err();
+        parse("fn t(a::i32):i32".into(), None).unwrap_err();
     }
 }
