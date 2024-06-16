@@ -4,7 +4,7 @@ pub mod ast;
 mod ast_to_ir;
 pub mod ir;
 mod parser;
-mod printer;
+pub mod transforms;
 
 pub use ast_to_ir::ast_to_ir;
 pub use ir::IR;

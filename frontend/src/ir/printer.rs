@@ -1,8 +1,6 @@
-use std::cell::Cell;
-use std::{collections::HashMap, hash::Hash};
+use std::collections::HashMap;
 
 use super::*;
-
 
 fn arg_list(head: &str, tail: &str, sep: &str, args: impl Iterator<Item = String>) -> String {
     let args = args.collect::<Vec<_>>();
@@ -119,13 +117,26 @@ impl<'ir> BasicPrinter<'ir> {
                 name = "add";
             }
             OPKind::Call { func, args } => {
-                return format!("{} = call @f{}{}", self.print_var(op.res.unwrap()), self.fn_prefix_ids[func], arg_list("(", ")", ", ", args.iter().map(|var| {
-                    self.print_var(*var)
-                })));
+                return format!(
+                    "{} = call @f{}{}",
+                    self.print_var(op.res.unwrap()),
+                    self.fn_prefix_ids[func],
+                    arg_list(
+                        "(",
+                        ")",
+                        ", ",
+                        args.iter().map(|var| { self.print_var(*var) })
+                    )
+                );
             }
-            OPKind::GetAttr { obj, attr, idx } => {
-                args = vec![*obj];
-                name = "getattr";
+            OPKind::GetAttr { obj, attr, idx, } => {
+                return format!(
+                    "{} = getattr[@{}, idx={:?}]({})",
+                    self.print_var(op.res.unwrap()),
+                    self.ir.get_symbol(*attr).unwrap().name,
+                    idx,
+                    self.print_var(*obj),
+                );
             }
             OPKind::Return { value } => {
                 args = vec![*value];
@@ -136,56 +147,50 @@ impl<'ir> BasicPrinter<'ir> {
                 name = "struct_ctor";
             }
         }
-        let args = arg_list("(", ")", ", ", args.iter().map(|var| {
-            self.print_var(*var)
-        }));
+        let args = arg_list("(", ")", ", ", args.iter().map(|var| self.print_var(*var)));
         if let Some(ret) = op.res {
-            return format!(
-                "{} = {}{}",
-                self.print_var(ret),
-                name,
-                args
-            );
+            return format!("{} = {}{}", self.print_var(ret), name, args);
         }
         format!("{}{}", name, args)
     }
 
     pub fn print_function(&self, func_id: FuncID) -> String {
         let func = self.ir.get(func_id).unwrap();
-        let args = arg_list("(", ")", ", ", func.vars.iter().map(|var| {
-            self.print_var(*var)
-        }));
+        let args = arg_list(
+            "(",
+            ")",
+            ", ",
+            func.vars.iter().map(|var| self.print_var(*var)),
+        );
         let ret_ty = self.print_type(func.decl.ret_ty);
         let prefix = self.fn_prefix_ids[&func_id];
-        let body = func.body.iter().map(|op| {
-            self.print_op(op)
-        }).collect::<Vec<_>>().join("\n ");
+        let body = func
+            .body
+            .iter()
+            .map(|op| self.print_op(op))
+            .collect::<Vec<_>>()
+            .join("\n ");
 
-        format!(
-            "fn @f{}{}: {} {{\n {body}\n}}  ",
-            prefix,
-            args,
-            ret_ty,
-        )
+        format!("fn @f{}{}: {} {{\n {body}\n}}  ", prefix, args, ret_ty,)
     }
 
     pub fn print_function_stub(&self, func: FuncID) -> String {
         let fimpl = self.ir.get(func).unwrap();
-        let args = arg_list("(", ")", ", ", fimpl.decl.args.iter().map(|(name, ty)| {
-            format!(
-                "{}: {}",
-                self.ir.get_symbol(*name).unwrap().name,
-                self.print_type(*ty)
-            )
-        }));
+        let args = arg_list(
+            "(",
+            ")",
+            ", ",
+            fimpl.decl.args.iter().map(|(name, ty)| {
+                format!(
+                    "{}: {}",
+                    self.ir.get_symbol(*name).unwrap().name,
+                    self.print_type(*ty)
+                )
+            }),
+        );
         let ret_ty = self.print_type(fimpl.decl.ret_ty);
         let prefix = self.fn_prefix_ids[&func];
-        format!(
-            "fn @f{}{}: {} {{...}}",
-            prefix,
-            args,
-            ret_ty,
-        )
+        format!("fn @f{}{}: {} {{...}}", prefix, args, ret_ty,)
     }
 
     pub fn print_class(&self, class_id: ClassID) -> String {
@@ -215,4 +220,3 @@ impl<'ir> BasicPrinter<'ir> {
         lines.join("\n")
     }
 }
-

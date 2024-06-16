@@ -6,7 +6,6 @@ pub use super::registry::NodeID;
 use super::registry::{Registry, UniqueRegistry};
 use crate::ast::Span;
 
-
 pub struct IR {
     symbols: UniqueRegistry<Symbol>,
     // paths: UniqueRegistry<Path>,

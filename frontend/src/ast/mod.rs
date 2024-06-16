@@ -146,7 +146,7 @@ pub trait Visitor<'a>: Sized {
         default_visit_expr(expr, self);
     }
 
-    fn visit_path(&mut self, path: &'a Path) {}
+    fn visit_path(&mut self, _path: &'a Path) {}
 
     fn visit_type(&mut self, ty: &'a Type) {
         default_visit_type(ty, self);
