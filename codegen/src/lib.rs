@@ -150,20 +150,20 @@ impl<'ctx, 'ir> CodeGen<'ctx, 'ir> {
 
 #[cfg(test)]
 mod tests {
-    use familia_frontend::{parse, ast_to_ir, ir::dump_ir};
     use super::*;
+    use familia_frontend::{ast_to_ir, ir::dump_ir, parse};
     #[test]
     fn test_struct() {
         let context = Context::create();
         let module = context.create_module("test");
-    
+
         let ty = context.opaque_struct_type("footy");
         ty.set_body(
             &[context.f128_type().into(), context.i32_type().into()],
             false,
         );
         assert!(!ty.is_opaque());
-    
+
         let builder1 = context.create_builder();
         let builder2 = context.create_builder();
         let struct_ty = context.struct_type(
@@ -177,22 +177,22 @@ mod tests {
             &[context.i32_type().into(), context.i32_type().into()],
             false,
         );
-    
+
         let func1 = module.add_function("foo", fn_type, None);
         let func2 = module.add_function("bar", fn_type2, None);
-    
+
         let entry1 = context.append_basic_block(func1, "entry");
         let entry2 = context.append_basic_block(func2, "entry");
         builder1.position_at_end(entry1);
         builder2.position_at_end(entry2);
-    
+
         builder1.build_return(None).unwrap();
         builder2.build_return(None).unwrap();
-    
+
         let module_str = module.print_to_string().to_string();
         // println!("{}", module_str);
     }
-    
+
     #[test]
     fn test_gen() {
         let ast = parse("fn foo(): i32 { return (1 + 2); }").unwrap();
@@ -201,5 +201,4 @@ mod tests {
         let llvm = super::generate_llvm(&ir).unwrap();
         println!("{}", llvm);
     }
-
 }

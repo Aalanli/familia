@@ -2,23 +2,23 @@ use std::any::Any;
 
 use anyhow::Result;
 
-use super::registry::{Registry, UniqueRegistry};
 pub use super::registry::NodeID;
+use super::registry::{Registry, UniqueRegistry};
 use crate::ast::Span;
 
 
 pub struct IR {
     symbols: UniqueRegistry<Symbol>,
-    paths: UniqueRegistry<Path>,
+    // paths: UniqueRegistry<Path>,
     types: UniqueRegistry<Type>,
-    ir: Registry<dyn Any>
+    ir: Registry<dyn Any>,
 }
 
 impl IR {
     pub fn new() -> Self {
         IR {
             symbols: UniqueRegistry::new(),
-            paths: UniqueRegistry::new(),
+            // paths: UniqueRegistry::new(),
             types: UniqueRegistry::new(),
             ir: Registry::new(),
         }
@@ -55,6 +55,19 @@ impl IR {
         I::new(self.ir.temporary_id())
     }
 
+    pub fn new_var(&self, name: Option<SymbolID>, ty: Option<TypeID>, span: Option<Span>) -> VarID {
+        let name = name.unwrap_or_else(|| self.insert_symbol(""));
+        let id = self.temporary_id();
+        self.insert(Var { id, name, ty, span })
+    }
+
+    pub fn iter_ids<I: ID>(&self) -> impl Iterator<Item = (I, &I::Node)> {
+        self.ir.iter().filter_map(|x| {
+            let node = self.get::<I>(I::new(x))?;
+            Some((I::new(x), node))
+        })
+    }
+
     // These are separate because we need hashing utility
     //   perhaps in the future we can unify this, so that we have dyn Hash capability
     pub fn get_symbol(&self, id: SymbolID) -> Option<&Symbol> {
@@ -62,16 +75,18 @@ impl IR {
     }
 
     pub fn insert_symbol(&self, symbol: &str) -> SymbolID {
-        SymbolID(self.symbols.insert(Symbol { name: symbol.to_string() }))
+        SymbolID(self.symbols.insert(Symbol {
+            name: symbol.to_string(),
+        }))
     }
 
-    pub fn get_path(&self, id: PathID) -> Option<&Path> {
-        self.paths.get(id.0)
-    }
+    // pub fn get_path(&self, id: PathID) -> Option<&Path> {
+    //     self.paths.get(id.0)
+    // }
 
-    pub fn insert_path(&self, path: Path) -> PathID {
-        PathID(self.paths.insert(path))
-    }
+    // pub fn insert_path(&self, path: Path) -> PathID {
+    //     PathID(self.paths.insert(path))
+    // }
 
     // We have temporary ids because we want to be able to have recursively referring types
     pub fn get_type(&self, id: TypeID) -> Option<&Type> {
@@ -79,14 +94,13 @@ impl IR {
     }
 
     pub fn insert_type(&self, ty: TypeKind) -> TypeID {
-        TypeID(self.types.insert(Type{ kind: ty}))
+        TypeID(self.types.insert(Type { kind: ty }))
     }
 
     pub fn insert_type_with_id(&self, id: TypeID, ty: TypeKind) -> Result<()> {
-        self.types.insert_with(id.0, Type{ kind: ty })
-    }    
+        self.types.insert_with(id.0, Type { kind: ty })
+    }
 }
-
 
 pub trait ID: Copy + Eq + std::hash::Hash {
     type Node: 'static;
@@ -96,7 +110,7 @@ pub trait ID: Copy + Eq + std::hash::Hash {
 
 macro_rules! impl_id {
     ($id:ident, $node:ident) => {
-        #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
         pub struct $id(NodeID);
 
         impl ID for $id {
@@ -113,7 +127,7 @@ macro_rules! impl_id {
 
 impl_id!(SymbolID, Symbol);
 
-#[derive(Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Symbol {
     pub name: String,
 }
@@ -133,13 +147,13 @@ pub struct Var {
     pub id: VarID,
     pub name: SymbolID,
     pub ty: Option<TypeID>,
-    pub span: Span,
+    pub span: Option<Span>,
     // pub decl_ty_path: Option<PathID>,
 }
 
 impl_id!(TypeID, Type);
 
-#[derive(Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Type {
     pub kind: TypeKind,
 }
@@ -153,7 +167,7 @@ pub struct TypeDecl {
     pub span: Span,
 }
 
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum TypeKind {
     I32,
     Void,
@@ -167,7 +181,7 @@ impl Default for TypeKind {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct FuncDecl {
     pub name: SymbolID,
     pub args: Vec<(SymbolID, TypeID)>,
@@ -176,7 +190,7 @@ pub struct FuncDecl {
 
 impl_id!(FuncID, FuncImpl);
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct FuncImpl {
     pub decl: FuncDecl,
     pub vars: Vec<VarID>,
@@ -189,7 +203,7 @@ impl_id!(OPID, OP);
 pub struct OP {
     pub id: OPID,
     pub kind: OPKind,
-    pub var: Option<VarID>,
+    pub res: Option<VarID>,
     pub span: Span,
 }
 
@@ -201,7 +215,7 @@ pub enum OPKind {
         idx: Option<usize>,
     },
     Call {
-        path: PathID,
+        // path: PathID,
         func: FuncID,
         args: Vec<VarID>,
     },
@@ -221,9 +235,10 @@ pub enum OPKind {
     Assign {
         lhs: VarID,
         rhs: VarID,
-    }
+    },
 }
 
+#[derive(Debug, Clone)]
 pub struct ClassDecl {
     pub name: SymbolID,
     pub repr_ty: TypeID,
@@ -231,6 +246,7 @@ pub struct ClassDecl {
 
 impl_id!(ClassID, ClassImpl);
 
+#[derive(Debug, Clone)]
 pub struct ClassImpl {
     pub decl: ClassDecl,
     pub methods: Vec<FuncID>,

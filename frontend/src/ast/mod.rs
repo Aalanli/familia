@@ -2,11 +2,10 @@ mod lexer;
 
 use std::fmt::Display;
 
-pub use lexer::{Symbol, Lexer, LexError, Ident, Loc, Span, Tok};
+pub use lexer::{Ident, LexError, Lexer, Loc, Span, Symbol, Tok};
 
 pub mod ptr;
 pub use ptr::P;
-
 
 #[derive(Clone, Debug)]
 pub struct Var {
@@ -61,7 +60,7 @@ pub enum DeclKind {
         file: Option<String>,
         top: bool,
         decls: Vec<Decl>,
-    }
+    },
 }
 
 impl Decl {

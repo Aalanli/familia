@@ -1,7 +1,7 @@
 use clap::{Parser, ValueEnum};
 
-use familia_frontend::{parse, ir};
 use familia_codegen::generate_llvm;
+use familia_frontend::{ir, parse};
 
 #[derive(Parser, Debug)]
 #[command(version, about)]

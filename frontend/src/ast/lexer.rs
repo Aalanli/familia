@@ -10,7 +10,7 @@ pub struct Span {
 pub struct Loc {
     pub global: usize,
     pub line: u64,
-    pub start: u32
+    pub start: u32,
 }
 
 impl Default for Loc {
@@ -135,7 +135,7 @@ impl<T: Iterator<Item = char>> Lexer<T> {
         }
         None
     }
-    
+
     fn peek_char(&mut self) -> Option<char> {
         if self.window.is_none() {
             self.window = self.input.next();
@@ -210,9 +210,7 @@ impl<T: Iterator<Item = char>> Lexer<T> {
     }
 
     fn fill_ident(&mut self) {
-        self.fill_buf(|c| {
-            c.is_alphanumeric()
-        });
+        self.fill_buf(|c| c.is_alphanumeric());
     }
 
     fn ignore_line(&mut self) {
@@ -301,7 +299,7 @@ impl<T: Iterator<Item = char>> Lexer<T> {
                 self.ignore_line();
                 continue;
             }
-            
+
             self.fill_ident();
             // println!("{:?}", self.buf.iter().collect::<String>());
             if self.match_and_eat("i32") {
@@ -322,8 +320,14 @@ impl<T: Iterator<Item = char>> Lexer<T> {
             } else if self.match_and_eat("return") {
                 let rpos = self.get_loc();
                 return Some(Ok((lpos, Tok::Return, rpos)));
-            } else if self.buf.iter().all(|x| x.is_numeric()) { // todo: should change to regex
-                let num = self.buf.iter().collect::<String>().parse().map_err(|x| LexError::ParseIntError(format!("{x}")));
+            } else if self.buf.iter().all(|x| x.is_numeric()) {
+                // todo: should change to regex
+                let num = self
+                    .buf
+                    .iter()
+                    .collect::<String>()
+                    .parse()
+                    .map_err(|x| LexError::ParseIntError(format!("{x}")));
                 self.clear_buf(|_| true);
                 if let Err(e) = num {
                     return Some(Err(e));
@@ -334,10 +338,14 @@ impl<T: Iterator<Item = char>> Lexer<T> {
                 let ident = self.buf.iter().collect::<String>();
                 self.clear_buf(|_| true);
                 let rpos = self.get_loc();
-                return Some(Ok((lpos, Tok::Ident(Ident {
-                    name: Symbol::from_str(&ident),
-                    span: lpos.span(rpos),
-                }), self.get_loc())));
+                return Some(Ok((
+                    lpos,
+                    Tok::Ident(Ident {
+                        name: Symbol::from_str(&ident),
+                        span: lpos.span(rpos),
+                    }),
+                    self.get_loc(),
+                )));
             }
 
             let res = Some(Err(LexError::UnrecognizedToken(self.buf.iter().collect())));
@@ -354,7 +362,6 @@ impl<T: Iterator<Item = char>> Iterator for Lexer<T> {
         self.next()
     }
 }
-
 
 #[cfg(test)]
 mod test_lex {
@@ -407,7 +414,7 @@ mod test_lex {
         } else {
             panic!();
         }
-        
+
         let mut lexer2 = Lexer::new(input2.chars());
         assert!(lexer2.next().unwrap().unwrap().1 == Tok::Int(124));
         let mut lexer3 = Lexer::new(input3.chars());
@@ -426,4 +433,3 @@ mod test_lex {
         assert!(lexer5.next().unwrap().unwrap().1 == Tok::ColonAcc);
     }
 }
-

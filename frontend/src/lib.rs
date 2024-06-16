@@ -1,11 +1,13 @@
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, Error};
 
 pub mod ast;
-pub mod ir;
 mod ast_to_ir;
+pub mod ir;
 mod parser;
 mod printer;
 
+pub use ast_to_ir::ast_to_ir;
+pub use ir::IR;
 pub use parser::parse;
 
 #[derive(Clone, Debug)]

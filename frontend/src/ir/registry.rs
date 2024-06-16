@@ -1,20 +1,19 @@
-
 use std::cell::RefCell;
-use std::{cell::Cell, collections::HashMap};
 use std::hash::Hash;
+use std::{cell::Cell, collections::HashMap};
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct NodeID {
     pub id: u32,
 }
 
+#[derive(Debug, Clone)]
 pub struct Registry<T: ?Sized> {
     data: RefCell<HashMap<u32, Box<T>>>,
     id: Cell<u32>,
 }
-
 
 impl<T: ?Sized> Registry<T> {
     pub fn new() -> Self {
@@ -54,10 +53,14 @@ impl<T: ?Sized> Registry<T> {
     // }
 
     pub fn iter(&self) -> impl Iterator<Item = NodeID> {
-        self.data.borrow().keys().map(|id| NodeID { id: *id }).collect::<Vec<_>>().into_iter()
+        self.data
+            .borrow()
+            .keys()
+            .map(|id| NodeID { id: *id })
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 }
-
 
 impl<T> Registry<T> {
     pub fn insert_with(&self, id: NodeID, value: T) {
@@ -85,7 +88,7 @@ impl<T: ?Sized> Registry<T> {
     }
 }
 
-
+#[derive(Clone, Debug)]
 pub struct UniqueRegistry<T> {
     registry: Registry<T>,
     rev: RefCell<HashMap<T, NodeID>>,
@@ -125,7 +128,6 @@ impl<T: Clone + Hash + Eq> UniqueRegistry<T> {
         self.registry.get(id)
     }
 }
-
 
 #[cfg(test)]
 mod test_registry {
