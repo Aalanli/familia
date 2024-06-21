@@ -1,0 +1,87 @@
+warning: value assigned to `a` is never read
+ --> rust_type_error.rs:4:5
+  |
+4 |     a = "hello";
+  |     ^
+  |
+  = help: maybe it is overwritten before being read?
+  = note: `#[warn(unused_assignments)]` on by default
+
+warning: unused variable: `a`
+ --> rust_type_error.rs:3:8
+  |
+3 | fn foo(a: &str) -> () {
+  |        ^ help: if this is intentional, prefix it with an underscore: `_a`
+  |
+  = note: `#[warn(unused_variables)]` on by default
+
+error[E0384]: cannot assign to immutable argument `a`
+ --> rust_type_error.rs:4:5
+  |
+3 | fn foo(a: &str) -> () {
+  |        - help: consider making this binding mutable: `mut a`
+4 |     a = "hello";
+  |     ^^^^^^^^^^^ cannot assign to immutable argument
+
+error[E0515]: cannot return reference to temporary value
+  --> rust_type_error.rs:12:9
+   |
+12 |         &(*b + 1)
+   |         ^--------
+   |         ||
+   |         |temporary value created here
+   |         returns a reference to data owned by the current function
+
+error: lifetime may not live long enough
+  --> rust_type_error.rs:21:9
+   |
+17 | fn baz<'a, 'b>(a: &'a i32, b: &'b i32) -> &'a i32 {
+   |        --  -- lifetime `'b` defined here
+   |        |
+   |        lifetime `'a` defined here
+...
+21 |         b
+   |         ^ function was supposed to return data with lifetime `'a` but it is returning data with lifetime `'b`
+   |
+   = help: consider adding the following bound: `'b: 'a`
+
+warning: value assigned to `x` is never read
+  --> rust_type_error.rs:29:5
+   |
+29 |     x = 5;
+   |     ^
+   |
+   = help: maybe it is overwritten before being read?
+
+warning: unused variable: `z`
+  --> rust_type_error.rs:30:9
+   |
+30 |     let z = *y;
+   |         ^ help: if this is intentional, prefix it with an underscore: `_z`
+
+error[E0506]: cannot assign to `x` because it is borrowed
+  --> rust_type_error.rs:29:5
+   |
+28 |     let y = &x;
+   |             -- `x` is borrowed here
+29 |     x = 5;
+   |     ^^^^^ `x` is assigned to here but it was already borrowed
+30 |     let z = *y;
+   |             -- borrow later used here
+
+warning: unused variable: `z`
+  --> rust_type_error.rs:37:9
+   |
+37 |     let z = bar(&x, &y);
+   |         ^ help: if this is intentional, prefix it with an underscore: `_z`
+
+warning: unused variable: `c`
+  --> rust_type_error.rs:40:9
+   |
+40 |     let c = baz(&a, &b);
+   |         ^ help: if this is intentional, prefix it with an underscore: `_c`
+
+error: aborting due to 4 previous errors; 6 warnings emitted
+
+Some errors have detailed explanations: E0384, E0506, E0515.
+For more information about an error, try `rustc --explain E0384`.

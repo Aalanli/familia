@@ -201,3 +201,31 @@ interface I3 extends c2.I1[type T = i32] {...}
 - Path linkages for Figure 23 is also pretty straightforward. Not going to look too precisely for now since its fairly orthogonal to the polymorphism features.
 - Constraint entailment: If $variance(\mathbb Q) = 0$ and $K \vdash T_2 \leq T_1$ then I think there is no subtyping relation between $Q(T_1) \leq Q(T_2)$? Assuming $0$ means invariant.
   - otherwise everything is straightforward
+
+# Compiler notes
+
+Compiler error syntax: (roughly from rust)
+```
+error_type ':' error_message
+'>' file ':' line ':' column
+line_text
+line_highlight [highlight_message]
+
+error_type := "error" | "warning"
+```
+
+or more generally, to allow multi-line errors
+```
+error_type ':' error_message
+(file_error)*
+
+file_error := 
+    '>' file ':' line ':' column
+    (line_error)*
+
+line_error :=
+    line_text
+    line_highlight [highlight_message]
+
+error_type := "error" | "warning"
+```

@@ -1,0 +1,7 @@
+cc_type_error.cc:4:9: error: incompatible integer to pointer conversion assigning to 'int *' from 'int'
+    b = 2;
+        ^
+cc_type_error.cc:7:10: error: unknown type name 'T'
+void bar(T b) {}
+         ^
+2 errors generated.

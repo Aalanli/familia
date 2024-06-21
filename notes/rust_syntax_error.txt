@@ -1,0 +1,24 @@
+error: expected `;`, found keyword `let`
+ --> rust_syntax_error.rs:3:14
+  |
+3 |     let x = 5
+  |              ^ help: add `;` here
+4 |     let b = 2
+  |     --- unexpected token
+
+error: expected `;`, found `}`
+ --> rust_syntax_error.rs:4:14
+  |
+4 |     let b = 2
+  |              ^ help: add `;` here
+5 | }
+  | - unexpected token
+
+error: expected one of `#`, `>`, `const`, identifier, or lifetime, found `-`
+ --> rust_syntax_error.rs:7:9
+  |
+7 | fn bar <-> () {
+  |         ^ expected one of `#`, `>`, `const`, identifier, or lifetime
+
+error: aborting due to 3 previous errors
+

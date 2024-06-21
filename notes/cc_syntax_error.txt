@@ -1,0 +1,15 @@
+cc_syntax_error.cc:3:14: error: variable has incomplete type 'struct T'
+    struct T t;
+             ^
+cc_syntax_error.cc:3:12: note: forward declaration of 'T'
+    struct T t;
+           ^
+cc_syntax_error.cc:9:12: error: function definition is not allowed here
+int main() {
+           ^
+cc_syntax_error.cc:12:1: error: expected '}'
+^
+cc_syntax_error.cc:2:12: note: to match this '{'
+void foo() {
+           ^
+3 errors generated.
