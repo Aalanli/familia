@@ -3,4 +3,4 @@ mod printer;
 mod registry;
 
 pub use ir_kinds::*;
-pub use printer::print_basic;
+pub use printer::{print_basic, IRNamer};

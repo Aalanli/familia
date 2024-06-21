@@ -21,16 +21,15 @@ pub fn print_basic(ir: &IR) -> String {
     printer.print_ir()
 }
 
-pub struct BasicPrinter<'ir> {
+pub struct IRNamer {
     fn_prefix_ids: HashMap<FuncID, u32>,
     type_prefix_ids: HashMap<TypeDeclID, u32>,
     class_prefix_ids: HashMap<ClassID, u32>,
     var_prefix: HashMap<VarID, u32>,
-    ir: &'ir IR,
 }
 
-impl<'ir> BasicPrinter<'ir> {
-    pub fn new(ir: &'ir IR) -> Self {
+impl IRNamer {
+    pub fn new(ir: &IR) -> Self {
         let mut fn_prefix_ids = HashMap::new();
         let mut type_prefix_ids = HashMap::new();
         let mut class_prefix_ids = HashMap::new();
@@ -47,11 +46,40 @@ impl<'ir> BasicPrinter<'ir> {
         for (i, (id, _)) in ir.iter_ids::<VarID>().enumerate() {
             var_prefix.insert(id, i as u32);
         }
-        BasicPrinter {
+        IRNamer {
             fn_prefix_ids,
             type_prefix_ids,
             class_prefix_ids,
             var_prefix,
+        }
+    }
+
+    pub fn name_type(&self, ty: TypeDeclID) -> String {
+        format!("t{}", self.type_prefix_ids[&ty])
+    }
+
+    pub fn name_var(&self, var: VarID) -> String {
+        format!("{}", self.var_prefix[&var])
+    }
+
+    pub fn name_func(&self, func: FuncID) -> String {
+        format!("f{}", self.fn_prefix_ids[&func])
+    }
+
+    pub fn name_class(&self, class: ClassID) -> String {
+        format!("c{}", self.class_prefix_ids[&class])
+    }
+}
+
+pub struct BasicPrinter<'ir> {
+    ir_namer: IRNamer,
+    ir: &'ir IR,
+}
+
+impl<'ir> BasicPrinter<'ir> {
+    pub fn new(ir: &'ir IR) -> Self {
+        BasicPrinter {
+            ir_namer: IRNamer::new(ir),
             ir,
         }
     }
@@ -74,7 +102,7 @@ impl<'ir> BasicPrinter<'ir> {
                 );
             }
             TypeKind::Decl { decl } => {
-                return format!("@t{}", self.type_prefix_ids[decl]);
+                return format!("@{}", self.ir_namer.name_type(*decl));
             }
             TypeKind::I32 => {
                 return "i32".to_string();
@@ -88,16 +116,16 @@ impl<'ir> BasicPrinter<'ir> {
     pub fn print_type_decl(&self, ty_id: TypeDeclID) -> String {
         let ty = self.ir.get(ty_id).unwrap();
         let decl = self.print_type(ty.decl);
-        format!("type @t{} = {}", self.type_prefix_ids[&ty_id], decl)
+        format!("type @{} = {}", self.ir_namer.name_type(ty_id), decl)
     }
 
     pub fn print_var(&self, var_id: VarID) -> String {
         let var = self.ir.get(var_id).unwrap();
         if var.ty.is_none() {
-            return format!("%{}", self.var_prefix[&var_id]);
+            return format!("%{}", self.ir_namer.name_var(var_id));
         }
         let ty = self.print_type(var.ty.unwrap());
-        format!("%{}: {}", self.var_prefix[&var_id], ty)
+        format!("%{}: {}", self.ir_namer.name_var(var_id), ty)
     }
 
     pub fn print_op(&self, op_id: &OPID) -> String {
@@ -118,9 +146,9 @@ impl<'ir> BasicPrinter<'ir> {
             }
             OPKind::Call { func, args } => {
                 return format!(
-                    "{} = call @f{}{}",
+                    "{} = call @{}{}",
                     self.print_var(op.res.unwrap()),
-                    self.fn_prefix_ids[func],
+                    self.ir_namer.name_func(*func),
                     arg_list(
                         "(",
                         ")",
@@ -163,7 +191,7 @@ impl<'ir> BasicPrinter<'ir> {
             func.vars.iter().map(|var| self.print_var(*var)),
         );
         let ret_ty = self.print_type(func.decl.ret_ty);
-        let prefix = self.fn_prefix_ids[&func_id];
+        let prefix = self.ir_namer.name_func(func_id);
         let body = func
             .body
             .iter()
@@ -171,7 +199,7 @@ impl<'ir> BasicPrinter<'ir> {
             .collect::<Vec<_>>()
             .join("\n ");
 
-        format!("fn @f{}{}: {} {{\n {body}\n}}  ", prefix, args, ret_ty,)
+        format!("fn @{}{}: {} {{\n {body}\n}}  ", prefix, args, ret_ty,)
     }
 
     pub fn print_function_stub(&self, func: FuncID) -> String {
@@ -189,13 +217,13 @@ impl<'ir> BasicPrinter<'ir> {
             }),
         );
         let ret_ty = self.print_type(fimpl.decl.ret_ty);
-        let prefix = self.fn_prefix_ids[&func];
-        format!("fn @f{}{}: {} {{...}}", prefix, args, ret_ty,)
+        let prefix = self.ir_namer.name_func(func);
+        format!("fn @{}{}: {} {{...}}", prefix, args, ret_ty,)
     }
 
     pub fn print_class(&self, class_id: ClassID) -> String {
         let class = self.ir.get(class_id).unwrap();
-        let mut str = format!("class @c{}", self.class_prefix_ids[&class_id]);
+        let mut str = format!("class @{}", self.ir_namer.name_class(class_id));
         str += " {\n";
         for methods in class.methods.iter() {
             str += " ";

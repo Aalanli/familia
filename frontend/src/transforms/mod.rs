@@ -58,7 +58,7 @@ impl<'a> BasicTypeInfer<'a> {
         let parent = self.var_parent.parent(id).unwrap();
         let op = self.ir.get(parent).unwrap();
         let ty = match &op.kind {
-            ir::OPKind::Add { lhs, rhs } => {
+            ir::OPKind::Add { .. } => { // TODO: should check types
                 self.ir.insert_type(ir::TypeKind::I32)
             }
             ir::OPKind::GetAttr { obj, attr, .. } => {
@@ -126,10 +126,24 @@ fn rewrite_var_types(ir: &mut ir::IR) {
     }
 }
 
+
+pub fn transform_ir(ir: &mut ir::IR) {
+    rewrite_var_types(ir);
+}
+
+
 #[cfg(test)]
 mod test_type_infer {
     use super::*;
     use crate::parse;
+
+    fn generate_ir_from_str(s: &str) -> ir::IR {
+        let ast = crate::parse(s.into(), None).unwrap();
+        let mut ir = crate::ast_to_ir(&ast).unwrap();
+        rewrite_var_types(&mut ir);
+        ir
+    }
+
     #[test]
     fn test1() {
         let ast = parse(
@@ -143,10 +157,29 @@ mod test_type_infer {
             }".into(), 
         None).unwrap();
 
-        let mut ir = crate::ast_to_ir(&ast).unwrap();
-        println!("{}", ir::print_basic(&ir));
-        rewrite_var_types(&mut ir);
-        println!("{}", ir::print_basic(&ir));
+        let mut _ir = crate::ast_to_ir(&ast).unwrap();
+        // println!("{}", ir::print_basic(&_ir));
+        rewrite_var_types(&mut _ir);
+        // println!("{}", ir::print_basic(&_ir));
+    }
+
+    #[test]
+    fn test2() {
+        let _ir = generate_ir_from_str(
+            "\
+            class S {
+                type F = {a: i32, b: T}
+                fn foo(a: S::F, b: i32): i32 {
+                    return (a.a + b);
+                }
+            }
+
+            type T = {a: i32, b: i32}
+            fn main() {
+                S::foo({a: 1, b: {a: 2, b: 3}}, 4);
+            }"
+        );
+        println!("{}", ir::print_basic(&_ir));
 
     }
 }

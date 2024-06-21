@@ -1,7 +1,6 @@
 use clap::{Parser, ValueEnum};
 
-use familia_codegen::generate_llvm;
-use familia_frontend::{ir, parse};
+use familia_frontend as frontend;
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -25,16 +24,16 @@ enum Mode {
 
 fn main() {
     let args = Cli::parse();
-    let program = std::fs::read_to_string(&args.file).unwrap();
-    let ast = parse(&program).unwrap();
-    let ir = ir::ast_to_ir(&ast).unwrap();
-    let result = match args.mode {
-        Mode::DumpIR => ir::dump_ir(&ir),
-        Mode::DumpLLVM => generate_llvm(&ir).unwrap(),
-    };
+    let text = std::fs::read_to_string(&args.file).unwrap();
+    let ast = frontend::parse(text, Some(args.file.into())).unwrap();
+    let ir = frontend::ast_to_ir(&ast).unwrap();
+    // let result = match args.mode {
+    //     Mode::DumpIR => frontend::ir::dump_ir(&ir),
+    //     Mode::DumpLLVM => generate_llvm(&ir).unwrap(),
+    // };
 
-    match args.output {
-        Some(output) => std::fs::write(output, result).unwrap(),
-        None => println!("{}", result),
-    }
+    // match args.output {
+    //     Some(output) => std::fs::write(output, result).unwrap(),
+    //     None => println!("{}", result),
+    // }
 }
