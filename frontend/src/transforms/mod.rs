@@ -55,7 +55,7 @@ impl<'a> BasicTypeInfer<'a> {
             return ty;
         }
 
-        let parent = self.var_parent.parent(id).unwrap();
+        let parent = self.var_parent.parent(id).expect(&format!("No parent for var {:?}", id.name_of(self.ir)));
         let op = self.ir.get(parent).unwrap();
         let ty = match &op.kind {
             ir::OPKind::Add { .. } => { // TODO: should check types
@@ -174,11 +174,31 @@ mod test_type_infer {
                 }
             }
 
+            fn bar(a: i32, b: i32): i32 {
+                let c = (a + 1);
+                let d = (b + 1);
+                return (c + d);
+            }
+
             type T = {a: i32, b: i32}
             fn main() {
                 S::foo({a: 1, b: {a: 2, b: 3}}, 4);
             }"
         );
+        println!("{}", ir::print_basic(&_ir));
+
+    }
+
+    #[test]
+    fn test_let() {
+        let _ir = generate_ir_from_str(
+            "\
+            fn bar(a: i32, b: i32): i32 {
+                let c = (a + 1);
+                let d = (b + 1);
+                return (c + d);
+            }
+        ");
         println!("{}", ir::print_basic(&_ir));
 
     }

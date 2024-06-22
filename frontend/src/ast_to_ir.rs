@@ -204,9 +204,17 @@ struct ASTToIR<'a> {
     ty_decl_to_id: PointerHashMap<'a, ast::Decl, ir::TypeDeclID>,
     fn_impl_to_id: PointerHashMap<'a, ast::Decl, ir::FuncID>,
     class_impl_to_id: PointerHashMap<'a, ast::Decl, ir::ClassID>,
+    var_remap: HashMap<ir::VarID, ir::VarID>,
 }
 
 impl<'a> ASTToIR<'a> {
+    fn maybe_remap_var(&mut self, var: ir::VarID) -> ir::VarID {
+        if let Some(remap) = self.var_remap.get(&var) {
+            return *remap;
+        }
+        var
+    }
+
     fn recursively_constuct_types(&mut self, ty: &ast::Type, ir: &mut ir::IR) -> ir::TypeKind {
         let ty_kind;
         match &ty.kind {
@@ -290,7 +298,7 @@ impl<'a> ASTToIR<'a> {
             ast::ExprKind::Var(v) => {
                 let sym = ir.insert_symbol(v.name.get_str());
                 let var_id = var_map.get(&sym).unwrap();
-                return *var_id;
+                return self.maybe_remap_var(*var_id);
             }
             ast::ExprKind::IntLit(i) => {
                 let id = ir.temporary_id();
@@ -414,14 +422,14 @@ impl<'a> ASTToIR<'a> {
                 return;
             }
             ast::StmtKind::LetStmt { var, expr } => {
-                let var_id = self.make_var(var, ir);
                 let var_sym = ir.insert_symbol(var.name.get_str());
-                var_map.insert(var_sym, var_id);
                 let expr_id = self.insert_expr(var_map, ops, expr, ir);
-                op_kind = ir::OPKind::Assign {
-                    lhs: var_id,
-                    rhs: expr_id,
-                };
+                var_map.insert(var_sym, expr_id);
+                // op_kind = ir::OPKind::Assign {
+                //     lhs: var_id,
+                //     rhs: expr_id,
+                // };
+                return;
             }
         }
         let op_id = ir.temporary_id();
@@ -434,6 +442,7 @@ impl<'a> ASTToIR<'a> {
                 id: op_id,
             },
         );
+        ops.push(op_id);
     }
 
     fn insert_fn_impl(&mut self, ir: &mut ir::IR) {
@@ -545,6 +554,7 @@ pub fn ast_to_ir(program: &Program) -> Result<ir::IR> {
         ty_decl_to_id: PointerHashMap::new(),
         fn_impl_to_id: PointerHashMap::new(),
         class_impl_to_id: PointerHashMap::new(),
+        var_remap: HashMap::new(),
     };
     let mut ir = ir::IR::new();
     ast_to_ir.lower_ir(&mut ir);
@@ -599,8 +609,11 @@ mod ast_to_ir_test {
             None,
         )
         .unwrap();
+        // println!("{:?}", ast);
 
         let _ir = ast_to_ir(&ast).unwrap();
         println!("{}", ir::print_basic(&_ir));
     }
+
+    
 }

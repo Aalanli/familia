@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, hash::Hash};
 
 use super::*;
 
@@ -26,48 +26,63 @@ pub struct IRNamer {
     type_prefix_ids: HashMap<TypeDeclID, u32>,
     class_prefix_ids: HashMap<ClassID, u32>,
     var_prefix: HashMap<VarID, u32>,
+    cache: RefCell<HashMap<NodeID, Box<str>>>,
 }
 
 impl IRNamer {
-    pub fn new(ir: &IR) -> Self {
-        let mut fn_prefix_ids = HashMap::new();
-        let mut type_prefix_ids = HashMap::new();
-        let mut class_prefix_ids = HashMap::new();
-        let mut var_prefix = HashMap::new();
-        for (i, (id, _)) in ir.iter_ids::<FuncID>().enumerate() {
-            fn_prefix_ids.insert(id, i as u32);
-        }
-        for (i, (id, _)) in ir.iter_ids::<TypeDeclID>().enumerate() {
-            type_prefix_ids.insert(id, i as u32);
-        }
-        for (i, (id, _)) in ir.iter_ids::<ClassID>().enumerate() {
-            class_prefix_ids.insert(id, i as u32);
-        }
-        for (i, (id, _)) in ir.iter_ids::<VarID>().enumerate() {
-            var_prefix.insert(id, i as u32);
-        }
+    pub fn new(ir: &IR, stable: bool) -> Self {
         IRNamer {
-            fn_prefix_ids,
-            type_prefix_ids,
-            class_prefix_ids,
-            var_prefix,
+            fn_prefix_ids: Self::compute_id_name(ir, stable),
+            type_prefix_ids: Self::compute_id_name(ir, stable),
+            class_prefix_ids: Self::compute_id_name(ir, stable),
+            var_prefix: Self::compute_id_name(ir, stable),
+            cache: RefCell::new(HashMap::new()),
         }
     }
 
-    pub fn name_type(&self, ty: TypeDeclID) -> String {
-        format!("t{}", self.type_prefix_ids[&ty])
+    fn compute_id_name<T: ID>(ir: &IR, stable: bool) -> HashMap<T, u32> {
+        let mut prefix_ids = HashMap::new();
+        let mut ids = ir.iter_ids::<T>().map(|x| x.0).collect::<Vec<_>>();
+        if stable {
+            ids.sort();
+        }
+        for (i, id) in ids.into_iter().enumerate() {
+            prefix_ids.insert(id, i as u32);
+        }
+        prefix_ids
     }
 
-    pub fn name_var(&self, var: VarID) -> String {
-        format!("{}", self.var_prefix[&var])
+    fn cacher(&self, id: NodeID, f: impl FnOnce() -> String) -> &str {
+        if let Some(name) = self.cache.borrow().get(&id) {
+            return unsafe {
+                let name = &**name as *const str;
+                &*name
+            };
+        }
+        let name = f();
+        self.cache.borrow_mut().insert(id, Box::from(name.as_str()));
+        let b = self.cache.borrow();
+        let s = b.get(&id).unwrap();
+        unsafe {
+            let s = &**s as *const str;
+            &*s
+        }
     }
 
-    pub fn name_func(&self, func: FuncID) -> String {
-        format!("f{}", self.fn_prefix_ids[&func])
+    pub fn name_type(&self, ty: TypeDeclID) -> &str {
+        self.cacher(ty.id(), || format!("t{}", self.type_prefix_ids[&ty]))
     }
 
-    pub fn name_class(&self, class: ClassID) -> String {
-        format!("c{}", self.class_prefix_ids[&class])
+    pub fn name_var(&self, var: VarID) -> &str {
+        self.cacher(var.id(), || format!("{}", self.var_prefix[&var]))
+    }
+
+    pub fn name_func(&self, func: FuncID) -> &str {
+        self.cacher(func.id(), || format!("f{}", self.fn_prefix_ids[&func]))
+    }
+
+    pub fn name_class(&self, class: ClassID) -> &str {
+        self.cacher(class.id(), || format!("c{}", self.class_prefix_ids[&class]))
     }
 }
 
@@ -79,7 +94,7 @@ pub struct BasicPrinter<'ir> {
 impl<'ir> BasicPrinter<'ir> {
     pub fn new(ir: &'ir IR) -> Self {
         BasicPrinter {
-            ir_namer: IRNamer::new(ir),
+            ir_namer: IRNamer::new(ir, true),
             ir,
         }
     }
@@ -176,6 +191,7 @@ impl<'ir> BasicPrinter<'ir> {
             }
         }
         let args = arg_list("(", ")", ", ", args.iter().map(|var| self.print_var(*var)));
+        // println!("printing {name}{args}");
         if let Some(ret) = op.res {
             return format!("{} = {}{}", self.print_var(ret), name, args);
         }

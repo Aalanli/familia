@@ -101,7 +101,7 @@ impl IR {
     }
 }
 
-pub trait ID: Copy + Eq + std::hash::Hash {
+pub trait ID: Copy + Eq + Ord + std::hash::Hash {
     type Node: 'static;
     fn new(node: NodeID) -> Self;
     fn id(self) -> NodeID;
@@ -109,7 +109,7 @@ pub trait ID: Copy + Eq + std::hash::Hash {
 
 macro_rules! impl_id {
     ($id:ident, $node:ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
         pub struct $id(NodeID);
 
         impl ID for $id {
@@ -140,6 +140,16 @@ pub struct Path {
 }
 
 impl_id!(VarID, Var);
+
+impl VarID {
+    pub fn type_of(&self, ir: &IR) -> TypeID {
+        ir.get(*self).unwrap().ty.unwrap()
+    }
+
+    pub fn name_of<'ir>(&self, ir: &'ir IR) -> &'ir str {
+        ir.get_symbol(ir.get(*self).unwrap().name).unwrap().name.as_str()
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct Var {
@@ -206,7 +216,7 @@ pub struct OP {
     pub span: Span,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum OPKind {
     GetAttr {
         obj: VarID,

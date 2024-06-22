@@ -4,7 +4,7 @@ use std::{cell::Cell, collections::HashMap};
 
 use anyhow::{anyhow, Result};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct NodeID {
     pub id: u32,
 }
