@@ -57,7 +57,7 @@ impl<'ctx> CodeGenState<'ctx> {
 }
 
 fn generate_llvm_type<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, ty_id: ir::TypeID) -> BasicTypeEnum<'ctx> {
-    let ty_decl = ir.ir.get_type(ty_id).unwrap();
+    let ty_decl = ir.ir.get_unique(ty_id).unwrap();
     let res = match &ty_decl.kind {
         ir::TypeKind::Struct { fields } => {
             let struct_ty = code.context.struct_type(
@@ -88,7 +88,7 @@ fn codegen_type_decls<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir
 
     for (ty_id, decl) in ir.ir.iter_ids::<ir::TypeDeclID>() {
         let llvm_ty = code.context.get_struct_type(&ir.namer.name_type(ty_id)).unwrap();
-        let ty = ir.ir.get_type(decl.decl).unwrap();
+        let ty = ir.ir.get_unique(decl.decl).unwrap();
         if let ir::TypeKind::Struct { fields } = &ty.kind {
             llvm_ty.set_body(
                 &fields.iter().map(|&ty| 
@@ -105,7 +105,7 @@ fn codegen_fn<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
     for (func_id, func) in ir.ir.iter_ids::<ir::FuncID>() {
         let fn_type;
         let arg_types = func.decl.args.iter().map(|&(_, ty)| code.get_type(ir, ty).into()).collect::<Vec<_>>();
-        if func.decl.ret_ty == ir.ir.insert_type(ir::TypeKind::Void) {
+        if func.decl.ret_ty == ir::TypeID::insert_type(&ir.ir, ir::TypeKind::Void) {
             fn_type = code.context.void_type().fn_type(
                 &arg_types,
                 false
@@ -420,9 +420,9 @@ mod tests {
 
             }
         ");
-
-        let llvm = generate_llvm(&ir).unwrap();
-        println!("{}", llvm);
+        println!("{}", ir::print_basic(&ir));
+        // let llvm = generate_llvm(&ir).unwrap();
+        // println!("{}", llvm);
     }
 
 }

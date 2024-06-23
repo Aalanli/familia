@@ -227,11 +227,11 @@ impl<'a> ASTToIR<'a> {
             ast::TypeKind::Struct { fields } => {
                 let mut field_ids = Vec::new();
                 for field in fields {
-                    let fsym = ir.insert_symbol(field.name.get_str());
+                    let fsym = ir::SymbolID::insert_symbol(ir, field.name.get_str());
                     // by the grammar, ty is always Some
                     let fty = field.ty.as_ref().unwrap();
                     let fty_kind = self.recursively_constuct_types(fty, ir);
-                    field_ids.push((fsym, ir.insert_type(fty_kind)));
+                    field_ids.push((fsym, ir::TypeID::insert_type(ir, fty_kind)));
                 }
                 ty_kind = ir::TypeKind::Struct { fields: field_ids };
             }
@@ -261,8 +261,8 @@ impl<'a> ASTToIR<'a> {
             ir.insert_with(
                 id,
                 ir::TypeDecl {
-                    name: ir.insert_symbol(name.name.view()),
-                    decl: ir.insert_type(tkind),
+                    name: ir::SymbolID::insert_symbol(ir, name.name.view()),
+                    decl: ir::TypeID::insert_type(ir, tkind),
                     span: decl.span,
                 },
             );
@@ -271,7 +271,7 @@ impl<'a> ASTToIR<'a> {
 
     fn get_type(&mut self, ty: &ast::Type, ir: &mut ir::IR) -> ir::TypeID {
         let ty_kind = self.recursively_constuct_types(ty, ir);
-        ir.insert_type(ty_kind)
+        ir::TypeID::insert_type(ir, ty_kind)
     }
 
     fn make_var(&mut self, var: &ast::Var, ir: &mut ir::IR) -> ir::VarID {
@@ -279,7 +279,7 @@ impl<'a> ASTToIR<'a> {
         let id = ir.temporary_id();
         let var = ir::Var {
             id,
-            name: ir.insert_symbol(var.name.get_str()),
+            name: ir::SymbolID::insert_symbol(ir, var.name.get_str()),
             ty,
             span: Some(var.span),
         };
@@ -296,13 +296,13 @@ impl<'a> ASTToIR<'a> {
     ) -> ir::VarID {
         match &expr.kind {
             ast::ExprKind::Var(v) => {
-                let sym = ir.insert_symbol(v.name.get_str());
+                let sym = ir::SymbolID::insert_symbol(ir, v.name.get_str());
                 let var_id = var_map.get(&sym).unwrap();
                 return self.maybe_remap_var(*var_id);
             }
             ast::ExprKind::IntLit(i) => {
                 let id = ir.temporary_id();
-                let var = ir.new_var(None, None, Some(expr.span));
+                let var = ir::VarID::new_var(ir, None, None, Some(expr.span));
                 ir.insert_with(
                     id,
                     ir::OP {
@@ -317,14 +317,14 @@ impl<'a> ASTToIR<'a> {
             }
             ast::ExprKind::GetAttr { exp, sym } => {
                 let expr_id = self.insert_expr(var_map, ops, exp, ir);
-                let var = ir.new_var(None, None, Some(expr.span));
+                let var = ir::VarID::new_var(ir, None, None, Some(expr.span));
                 let id = ir.temporary_id();
                 ir.insert_with(
                     id,
                     ir::OP {
                         kind: ir::OPKind::GetAttr {
                             obj: expr_id,
-                            attr: ir.insert_symbol(sym.get_str()),
+                            attr: ir::SymbolID::insert_symbol(ir, sym.get_str()),
                             idx: None,
                         },
                         span: expr.span,
@@ -344,7 +344,7 @@ impl<'a> ASTToIR<'a> {
                     .fn_impl_to_id
                     .get(*self.path_map.get(path).unwrap())
                     .unwrap();
-                let var = ir.new_var(None, None, Some(expr.span));
+                let var = ir::VarID::new_var(ir, None, None, Some(expr.span));
                 let id = ir.temporary_id();
                 ir.insert_with(
                     id,
@@ -364,7 +364,7 @@ impl<'a> ASTToIR<'a> {
             ast::ExprKind::Add { lhs, rhs } => {
                 let lhs_id = self.insert_expr(var_map, ops, lhs, ir);
                 let rhs_id = self.insert_expr(var_map, ops, rhs, ir);
-                let var = ir.new_var(None, None, Some(expr.span));
+                let var = ir::VarID::new_var(ir, None, None, Some(expr.span));
                 let id = ir.temporary_id();
                 ir.insert_with(
                     id,
@@ -385,9 +385,9 @@ impl<'a> ASTToIR<'a> {
                 let mut field_ids = Vec::new();
                 for (sym, expr) in args.iter() {
                     let var_id = self.insert_expr(var_map, ops, expr, ir);
-                    field_ids.push((ir.insert_symbol(sym.get_str()), var_id));
+                    field_ids.push((ir::SymbolID::insert_symbol(ir, &sym.name.view()), var_id));
                 }
-                let var = ir.new_var(None, None, Some(expr.span));
+                let var = ir::VarID::new_var(ir, None, None, Some(expr.span));
                 let id = ir.temporary_id();
                 ir.insert_with(
                     id,
@@ -422,7 +422,7 @@ impl<'a> ASTToIR<'a> {
                 return;
             }
             ast::StmtKind::LetStmt { var, expr } => {
-                let var_sym = ir.insert_symbol(var.name.get_str());
+                let var_sym = ir::SymbolID::insert_symbol(ir, var.name.get_str());
                 let expr_id = self.insert_expr(var_map, ops, expr, ir);
                 var_map.insert(var_sym, expr_id);
                 // op_kind = ir::OPKind::Assign {
@@ -466,12 +466,12 @@ impl<'a> ASTToIR<'a> {
                 unreachable!()
             };
             let func_decl = ir::FuncDecl {
-                name: ir.insert_symbol(name.name.view()),
+                name: ir::SymbolID::insert_symbol(ir, name.name.view()),
                 args: args
                     .iter()
                     .map(|arg| {
                         (
-                            ir.insert_symbol(arg.name.get_str()),
+                            ir::SymbolID::insert_symbol(ir, arg.name.get_str()),
                             self.get_type(arg.ty.as_ref().unwrap(), ir),
                         )
                     })
@@ -484,7 +484,7 @@ impl<'a> ASTToIR<'a> {
                     .iter()
                     .zip(args.iter())
                     .fold(HashMap::new(), |mut acc, (var_id, arg)| {
-                        acc.insert(ir.insert_symbol(arg.name.get_str()), *var_id);
+                        acc.insert(ir::SymbolID::insert_symbol(ir, arg.name.get_str()), *var_id);
                         acc
                     });
             let mut ops = Vec::new();
@@ -518,8 +518,8 @@ impl<'a> ASTToIR<'a> {
                 unreachable!()
             };
             let class_decl = ir::ClassDecl {
-                name: ir.insert_symbol(name.name.view()),
-                repr_ty: ir.insert_type(ir::TypeKind::Void),
+                name: ir::SymbolID::insert_symbol(ir, name.name.view()),
+                repr_ty: ir::TypeID::insert_type(ir, ir::TypeKind::Void),
             };
             let mut class_methods = vec![];
             for sdecl in sub_decls.iter() {

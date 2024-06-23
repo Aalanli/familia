@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{any::Any, collections::{HashMap, HashSet}, hash::Hash, iter::Cycle};
+
+pub mod query;
+use query::*;
 
 use crate::ir;
 
@@ -26,6 +29,73 @@ impl VarParent {
     }
 }
 
+
+pub fn check_cycle(ir: &ir::IR, ty_id: ir::TypeID, visited: &mut HashSet<ir::TypeID>) -> bool {
+    if visited.contains(&ty_id) {
+        return true;
+    }
+    visited.insert(ty_id);
+    let ty = ir.get_unique(ty_id).unwrap();
+    let cycle = match &ty.kind {
+        ir::TypeKind::I32 => false,
+        ir::TypeKind::Void => false,
+        ir::TypeKind::Struct { fields } => {
+            for (_, field_ty) in fields {
+                if visited.contains(&field_ty) {
+                    return true;
+                }
+                
+                visited.insert(*field_ty);
+                if check_cycle(ir, *field_ty, visited) {
+                    return true;
+                }
+                visited.remove(&field_ty);
+            }
+            false
+        }
+        ir::TypeKind::Decl { decl } => {
+            let decl = ir.get(*decl).unwrap();
+            check_cycle(ir, decl.decl, visited)
+        }
+    };
+    visited.remove(&ty_id);
+    cycle
+}
+
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct ContainsCycle(ir::TypeID);
+
+impl Query for ContainsCycle {
+    type Result = bool;
+
+    fn query(&self, q: &QueryAnalysis) -> Self::Result {
+        let ir = q.ir();
+        let ty = ir.get_unique(self.0).unwrap();
+        match &ty.kind {
+            ir::TypeKind::I32 => false,
+            ir::TypeKind::Void => false,
+            ir::TypeKind::Struct { fields } => {
+                for (_, field_ty) in fields {
+                    match q.query(ContainsCycle(*field_ty)) {
+                        Ok(true) => return true,
+                        Ok(false) => {}
+                        Err(QueryCycle) => return true,
+                    }
+                }
+                false
+            }
+            ir::TypeKind::Decl { decl } => {
+                let decl = ir.get(*decl).unwrap();
+                q.query(ContainsCycle(decl.decl)).map_err(|_| true).unwrap()
+            }
+        }
+
+    }
+}
+
+pub fn flatten_typedecl(ir: &mut ir::IR) {
+
+}
 
 struct BasicTypeInfer<'a> {
     var_types: HashMap<ir::VarID, ir::TypeID>,
@@ -59,14 +129,14 @@ impl<'a> BasicTypeInfer<'a> {
         let op = self.ir.get(parent).unwrap();
         let ty = match &op.kind {
             ir::OPKind::Add { .. } => { // TODO: should check types
-                self.ir.insert_type(ir::TypeKind::I32)
+                ir::TypeID::insert_type(&mut self.ir, ir::TypeKind::I32)
             }
             ir::OPKind::GetAttr { obj, attr, .. } => {
                 let ty = self.type_of(*obj);
-                let mut struct_ty = self.ir.get_type(ty).unwrap();
+                let mut struct_ty = self.ir.get_unique(ty).unwrap();
                 if let ir::TypeKind::Decl { decl } = &struct_ty.kind {
                     let remapped = self.ir.get(*decl).unwrap().decl;
-                    struct_ty = self.ir.get_type(remapped).unwrap();
+                    struct_ty = self.ir.get_unique(remapped).unwrap();
                 }
                 if let ir::TypeKind::Struct { fields } = &struct_ty.kind {
                     let idx = fields.iter().position(|(name, _)| *name == *attr).unwrap();
@@ -83,11 +153,11 @@ impl<'a> BasicTypeInfer<'a> {
             }
             ir::OPKind::Struct { fields } => {
                 let field_tys = fields.iter().map(|(s, var)| (*s, self.type_of(*var))).collect();
-                let struct_ty = self.ir.insert_type(ir::TypeKind::Struct { fields: field_tys });
+                let struct_ty = ir::TypeID::insert_type(&mut self.ir, ir::TypeKind::Struct { fields: field_tys });
                 struct_ty
             }
             ir::OPKind::Constant { .. } => {
-                self.ir.insert_type(ir::TypeKind::I32)
+                ir::TypeID::insert_type(&mut self.ir, ir::TypeKind::I32)
             }
             _ => panic!("Unexpected op kind"),
         };

@@ -100,7 +100,7 @@ impl<'ir> BasicPrinter<'ir> {
     }
 
     pub fn print_type(&self, ty: TypeID) -> String {
-        let ty = self.ir.get_type(ty).unwrap();
+        let ty = self.ir.get_unique(ty).unwrap();
         match &ty.kind {
             TypeKind::Struct { fields } => {
                 return arg_list(
@@ -110,7 +110,7 @@ impl<'ir> BasicPrinter<'ir> {
                     fields.iter().map(|(name, ty)| {
                         format!(
                             "{}: {}",
-                            self.ir.get_symbol(*name).unwrap().name,
+                            name.get_str(&self.ir).unwrap(),
                             self.print_type(*ty)
                         )
                     }),
@@ -176,7 +176,7 @@ impl<'ir> BasicPrinter<'ir> {
                 return format!(
                     "{} = getattr[@{}, idx={:?}]({})",
                     self.print_var(op.res.unwrap()),
-                    self.ir.get_symbol(*attr).unwrap().name,
+                    attr.get_str(&self.ir).unwrap(),
                     idx,
                     self.print_var(*obj),
                 );
@@ -227,7 +227,7 @@ impl<'ir> BasicPrinter<'ir> {
             fimpl.decl.args.iter().map(|(name, ty)| {
                 format!(
                     "{}: {}",
-                    self.ir.get_symbol(*name).unwrap().name,
+                    name.get_str(&self.ir).unwrap(),
                     self.print_type(*ty)
                 )
             }),

@@ -1,34 +1,30 @@
 use std::any::Any;
+use std::hash::Hash;
 
-use anyhow::Result;
 
 pub use super::registry::NodeID;
-use super::registry::{Registry, UniqueRegistry};
+use super::registry::{Registry, GenericUniqueRegistry};
 use crate::ast::Span;
 
 pub struct IR {
-    symbols: UniqueRegistry<Symbol>,
-    // paths: UniqueRegistry<Path>,
-    types: UniqueRegistry<Type>,
-    ir: Registry<dyn Any>,
+    registry: Registry<dyn Any>,
+    unique_registry: GenericUniqueRegistry,
 }
 
 impl IR {
     pub fn new() -> Self {
         IR {
-            symbols: UniqueRegistry::new(),
-            // paths: UniqueRegistry::new(),
-            types: UniqueRegistry::new(),
-            ir: Registry::new(),
+            registry: Registry::new(),
+            unique_registry: GenericUniqueRegistry::new(),
         }
     }
 
     fn get_any(&self, id: NodeID) -> Option<&dyn Any> {
-        self.ir.get(id)
+        self.registry.get(id)
     }
 
     fn get_any_mut(&mut self, id: NodeID) -> Option<&mut dyn Any> {
-        self.ir.get_mut(id)
+        self.registry.get_mut(id)
     }
 
     pub fn get<I: ID>(&self, id: I) -> Option<&I::Node> {
@@ -42,67 +38,59 @@ impl IR {
     }
 
     pub fn insert<I: ID>(&self, node: I::Node) -> I {
-        let id = self.ir.insert_boxed(Box::new(node));
+        let id = self.registry.insert_boxed(Box::new(node));
         I::new(id)
     }
 
     pub fn insert_with<I: ID>(&self, id: I, node: I::Node) {
-        self.ir.insert_with_boxed(id.id(), Box::new(node));
+        self.registry.insert_with_boxed(id.id(), Box::new(node));
     }
 
     pub fn temporary_id<I: ID>(&self) -> I {
-        I::new(self.ir.temporary_id())
+        I::new(self.registry.temporary_id())
     }
 
-    pub fn new_var(&self, name: Option<SymbolID>, ty: Option<TypeID>, span: Option<Span>) -> VarID {
-        let name = name.unwrap_or_else(|| self.insert_symbol(""));
-        let id = self.temporary_id();
-        self.insert(Var { id, name, ty, span })
+    pub fn get_unique<U: UniqueID>(&self, id: U) -> Option<&U::Node> {
+        let res = self.unique_registry.get(id.id())?;
+        res.as_any().downcast_ref::<U::Node>()
+    }
+
+    pub fn insert_unique<U: UniqueID>(&self, node: U::Node) -> U {
+        let id = self.unique_registry.insert(node);
+        U::new(id)
+    }
+
+    pub fn insert_unique_with<U: UniqueID>(&self, id: U, node: U::Node) {
+        self.unique_registry.insert_with(id.id(), node).unwrap();
+    }
+
+    pub fn temporary_unique_id<U: UniqueID>(&self) -> U {
+        U::new(self.unique_registry.temporary_id())
     }
 
     pub fn iter_ids<I: ID>(&self) -> impl Iterator<Item = (I, &I::Node)> {
-        self.ir.iter().filter_map(|x| {
+        self.registry.iter().filter_map(|x| {
             let node = self.get::<I>(I::new(x))?;
             Some((I::new(x), node))
         })
     }
 
-    // These are separate because we need hashing utility
-    //   perhaps in the future we can unify this, so that we have dyn Hash capability
-    pub fn get_symbol(&self, id: SymbolID) -> Option<&Symbol> {
-        self.symbols.get(id.0)
-    }
-
-    pub fn insert_symbol(&self, symbol: &str) -> SymbolID {
-        SymbolID(self.symbols.insert(Symbol {
-            name: symbol.to_string(),
-        }))
-    }
-
-    // pub fn get_path(&self, id: PathID) -> Option<&Path> {
-    //     self.paths.get(id.0)
-    // }
-
-    // pub fn insert_path(&self, path: Path) -> PathID {
-    //     PathID(self.paths.insert(path))
-    // }
-
-    // We have temporary ids because we want to be able to have recursively referring types
-    pub fn get_type(&self, id: TypeID) -> Option<&Type> {
-        self.types.get(id.0)
-    }
-
-    pub fn insert_type(&self, ty: TypeKind) -> TypeID {
-        TypeID(self.types.insert(Type { kind: ty }))
-    }
-
-    pub fn insert_type_with_id(&self, id: TypeID, ty: TypeKind) -> Result<()> {
-        self.types.insert_with(id.0, Type { kind: ty })
+    pub fn iter_unique_ids<U: UniqueID>(&self) -> impl Iterator<Item = (U, &U::Node)> {
+        self.unique_registry.iter().filter_map(|x| {
+            let node = self.get_unique::<U>(U::new(x))?;
+            Some((U::new(x), node))
+        })
     }
 }
 
-pub trait ID: Copy + Eq + Ord + std::hash::Hash {
+pub trait ID: Copy + Eq + Ord + Hash {
     type Node: 'static;
+    fn new(node: NodeID) -> Self;
+    fn id(self) -> NodeID;
+}
+
+pub trait UniqueID: Copy + Eq + Ord + Hash {
+    type Node: Hash + Eq + 'static;
     fn new(node: NodeID) -> Self;
     fn id(self) -> NodeID;
 }
@@ -124,7 +112,38 @@ macro_rules! impl_id {
     };
 }
 
-impl_id!(SymbolID, Symbol);
+macro_rules! impl_unique_id {
+    ($id:ident, $node:ident) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+        pub struct $id(NodeID);
+
+        impl UniqueID for $id {
+            type Node = $node;
+            fn new(node: NodeID) -> Self {
+                $id(node)
+            }
+            fn id(self) -> NodeID {
+                self.0
+            }
+        }
+    };
+}
+
+impl_unique_id!(SymbolID, Symbol);
+
+impl SymbolID {
+    pub fn get_symbol<'a>(&self, ir: &'a IR) -> Option<&'a Symbol> {
+        ir.get_unique(*self)
+    }
+
+    pub fn get_str<'a>(&self, ir: &'a IR) -> Option<&'a str> {
+        Some(&self.get_symbol(ir)?.name)
+    }
+
+    pub fn insert_symbol(ir: &IR, name: &str) -> SymbolID {
+        ir.insert_unique(Symbol { name: name.to_string() })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Symbol {
@@ -147,7 +166,14 @@ impl VarID {
     }
 
     pub fn name_of<'ir>(&self, ir: &'ir IR) -> &'ir str {
-        ir.get_symbol(ir.get(*self).unwrap().name).unwrap().name.as_str()
+        let var = ir.get(*self).unwrap();
+        var.name.get_str(ir).unwrap()
+    }
+
+    pub fn new_var(ir: &IR, name: Option<SymbolID>, ty: Option<TypeID>, span: Option<Span>) -> VarID {
+        let name = name.unwrap_or_else(|| SymbolID::insert_symbol(ir, ""));
+        let id = ir.temporary_id();
+        ir.insert(Var { id, name, ty, span })
     }
 }
 
@@ -160,7 +186,13 @@ pub struct Var {
     // pub decl_ty_path: Option<PathID>,
 }
 
-impl_id!(TypeID, Type);
+impl_unique_id!(TypeID, Type);
+
+impl TypeID {
+    pub fn insert_type(ir: &IR, kind: TypeKind) -> TypeID {
+        ir.insert_unique(Type { kind })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Type {

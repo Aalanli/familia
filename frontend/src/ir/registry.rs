@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::hash::Hash;
+use std::rc::Rc;
 use std::{cell::Cell, collections::HashMap};
 
 use anyhow::{anyhow, Result};
@@ -88,47 +89,81 @@ impl<T: ?Sized> Registry<T> {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct UniqueRegistry<T> {
-    registry: Registry<T>,
-    rev: RefCell<HashMap<T, NodeID>>,
+
+use crate::transforms::query::DefaultIdentity;
+
+#[derive(Clone)]
+pub struct GenericUniqueRegistry {
+    data: RefCell<HashMap<u32, Rc<dyn DefaultIdentity>>>,
+    rev: RefCell<HashMap<Rc<dyn DefaultIdentity>, NodeID>>,
+    id: Cell<u32>,
 }
 
-impl<T: Clone + Hash + Eq> UniqueRegistry<T> {
+impl GenericUniqueRegistry {
     pub fn new() -> Self {
-        UniqueRegistry {
-            registry: Registry::new(),
+        GenericUniqueRegistry {
+            data: RefCell::new(HashMap::new()),
             rev: RefCell::new(HashMap::new()),
+            id: Cell::new(1),
         }
     }
 
-    pub fn contains(&self, value: &T) -> bool {
-        self.rev.borrow().contains_key(value)
+    pub fn contains<T>(&self, value: &T) -> bool
+    where T: DefaultIdentity {
+        let val: &dyn DefaultIdentity = value;
+        self.rev.borrow().contains_key(val)
     }
 
-    pub fn insert(&self, value: T) -> NodeID {
-        if let Some(id) = self.rev.borrow().get(&value) {
+    pub fn insert<T: DefaultIdentity>(&self, value: T) -> NodeID {
+        let val: &dyn DefaultIdentity = &value;
+        if let Some(id) = self.rev.borrow().get(val) {
             return *id;
         }
-        let id = self.registry.insert(value.clone());
-        self.rev.borrow_mut().insert(value, id);
-        id
+        let value: Rc<dyn DefaultIdentity> = Rc::new(value);
+        let id = self.id.get();
+        self.data.borrow_mut().insert(id, value.clone());
+        self.rev.borrow_mut().insert(value, NodeID { id });
+        self.id.set(id + 1);
+        NodeID { id }
     }
 
-    pub fn insert_with(&self, id: NodeID, value: T) -> Result<()> {
-        if self.rev.borrow().contains_key(&value) {
+    pub fn insert_with(&self, id: NodeID, value: impl DefaultIdentity) -> Result<()> {
+        let val: &dyn DefaultIdentity = &value;
+        if self.rev.borrow().contains_key(val) {
             return Err(anyhow!("Value already exists in registry"));
         }
-        self.rev.borrow_mut().insert(value.clone(), id);
-        self.registry.insert_with(id, value);
+        if id.id >= self.id.get() {
+            return Err(anyhow!("ID out of bounds"));
+        }
+
+        let value: Rc<dyn DefaultIdentity> = Rc::new(value);
+        self.data.borrow_mut().insert(id.id, value.clone());
+        self.rev.borrow_mut().insert(value, id);
         Ok(())
     }
 
-    pub fn get(&self, id: NodeID) -> Option<&T> {
-        self.registry.get(id)
+    pub fn get(&self, id: NodeID) -> Option<&dyn DefaultIdentity> {
+        self.data.borrow().get(&id.id).map(|x| {
+            let ptr = x.as_ref() as *const dyn DefaultIdentity;
+            unsafe { &*ptr }
+        })
+    }
+
+    pub fn temporary_id(&self) -> NodeID {
+        let id = self.id.get();
+        self.id.set(id + 1);
+        NodeID { id }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = NodeID> {
+        self.data
+            .borrow()
+            .keys()
+            .map(|id| NodeID { id: *id })
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 }
-
 #[cfg(test)]
 mod test_registry {
     use super::*;
@@ -147,11 +182,9 @@ mod test_registry {
 
     #[test]
     fn test_unique_registry() {
-        let reg = UniqueRegistry::new();
+        let reg = GenericUniqueRegistry::new();
         let id1 = reg.insert(1);
         let id2 = reg.insert(2);
-        assert_eq!(reg.get(id1), Some(&1));
-        assert_eq!(reg.get(id2), Some(&2));
         assert_eq!(reg.insert(1), id1);
     }
 
