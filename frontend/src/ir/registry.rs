@@ -49,10 +49,6 @@ impl<T: ?Sized> Registry<T> {
         }
     }
 
-    // pub fn pop(&mut self, id: NodeID) -> Option<T> {
-    //     self.data.borrow_mut().remove(&id.id).map(|x| *x)
-    // }
-
     pub fn iter(&self) -> impl Iterator<Item = NodeID> {
         self.data
             .borrow()
@@ -74,6 +70,10 @@ impl<T> Registry<T> {
         self.id.set(id + 1);
         NodeID { id }
     }
+
+    pub fn pop(&mut self, id: NodeID) -> Option<T> {
+        self.data.borrow_mut().remove(&id.id).map(|x| *x)
+    }
 }
 
 impl<T: ?Sized> Registry<T> {
@@ -89,7 +89,7 @@ impl<T: ?Sized> Registry<T> {
     }
 }
 
-use crate::transforms::query::DefaultIdentity;
+use crate::query::DefaultIdentity;
 
 #[derive(Clone)]
 pub struct GenericUniqueRegistry {
@@ -171,12 +171,12 @@ mod test_registry {
 
     #[test]
     fn test_registry() {
-        let reg = Registry::new();
+        let mut reg = Registry::new();
         let id1 = reg.insert(1);
         let id2 = reg.insert(2);
         assert_eq!(reg.get(id1), Some(&1));
         assert_eq!(reg.get(id2), Some(&2));
-        // assert_eq!(reg.pop(id1), Some(1));
+        assert_eq!(reg.pop(id1), Some(1));
         assert_eq!(reg.get(id1), None);
         assert_eq!(reg.get(id2), Some(&2));
     }
@@ -185,8 +185,15 @@ mod test_registry {
     fn test_unique_registry() {
         let reg = GenericUniqueRegistry::new();
         let id1 = reg.insert(1);
-        let id2 = reg.insert(2);
+        let _ = reg.insert(2);
         assert_eq!(reg.insert(1), id1);
+
+        let id3 = reg.insert("test");
+        let id4 = reg.insert("test");
+        assert_eq!(id3, id4);
+
+        let t = *reg.get(id3).unwrap().as_any().downcast_ref::<&str>().unwrap();
+        assert_eq!(t, "test");
     }
 
     #[test]

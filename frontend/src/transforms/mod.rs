@@ -5,8 +5,7 @@ use std::{
     iter::Cycle,
 };
 
-pub mod query;
-use query::*;
+use crate::query::*;
 
 use crate::ir;
 

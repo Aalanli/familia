@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Error};
 
+pub mod query;
 pub mod ast;
 mod ast_to_ir;
 pub mod ir;
