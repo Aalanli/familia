@@ -89,7 +89,6 @@ impl<T: ?Sized> Registry<T> {
     }
 }
 
-
 use crate::transforms::query::DefaultIdentity;
 
 #[derive(Clone)]
@@ -109,7 +108,9 @@ impl GenericUniqueRegistry {
     }
 
     pub fn contains<T>(&self, value: &T) -> bool
-    where T: DefaultIdentity {
+    where
+        T: DefaultIdentity,
+    {
         let val: &dyn DefaultIdentity = value;
         self.rev.borrow().contains_key(val)
     }

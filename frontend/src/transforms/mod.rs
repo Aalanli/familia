@@ -1,4 +1,9 @@
-use std::{any::Any, collections::{HashMap, HashSet}, hash::Hash, iter::Cycle};
+use std::{
+    any::Any,
+    collections::{HashMap, HashSet},
+    hash::Hash,
+    iter::Cycle,
+};
 
 pub mod query;
 use query::*;
@@ -19,16 +24,13 @@ impl VarParent {
             }
         }
 
-        VarParent {
-            var_parent,
-        }
+        VarParent { var_parent }
     }
 
     pub fn parent(&self, var: ir::VarID) -> Option<ir::OPID> {
         self.var_parent.get(&var).copied()
     }
 }
-
 
 pub fn check_cycle(ir: &ir::IR, ty_id: ir::TypeID, visited: &mut HashSet<ir::TypeID>) -> bool {
     if visited.contains(&ty_id) {
@@ -44,7 +46,7 @@ pub fn check_cycle(ir: &ir::IR, ty_id: ir::TypeID, visited: &mut HashSet<ir::Typ
                 if visited.contains(&field_ty) {
                     return true;
                 }
-                
+
                 visited.insert(*field_ty);
                 if check_cycle(ir, *field_ty, visited) {
                     return true;
@@ -89,13 +91,10 @@ impl Query for ContainsCycle {
                 q.query(ContainsCycle(decl.decl)).map_err(|_| true).unwrap()
             }
         }
-
     }
 }
 
-pub fn flatten_typedecl(ir: &mut ir::IR) {
-
-}
+pub fn flatten_typedecl(ir: &mut ir::IR) {}
 
 struct BasicTypeInfer<'a> {
     var_types: HashMap<ir::VarID, ir::TypeID>,
@@ -118,17 +117,21 @@ impl<'a> BasicTypeInfer<'a> {
     fn type_of(&mut self, id: ir::VarID) -> ir::TypeID {
         if let Some(ty) = self.var_types.get(&id) {
             return *ty;
-        } 
+        }
         let var = self.ir.get(id).unwrap();
         if let Some(ty) = var.ty {
             self.var_types.insert(id, ty);
             return ty;
         }
 
-        let parent = self.var_parent.parent(id).expect(&format!("No parent for var {:?}", id.name_of(self.ir)));
+        let parent = self
+            .var_parent
+            .parent(id)
+            .expect(&format!("No parent for var {:?}", id.name_of(self.ir)));
         let op = self.ir.get(parent).unwrap();
         let ty = match &op.kind {
-            ir::OPKind::Add { .. } => { // TODO: should check types
+            ir::OPKind::Add { .. } => {
+                // TODO: should check types
                 ir::TypeID::insert_type(&mut self.ir, ir::TypeKind::I32)
             }
             ir::OPKind::GetAttr { obj, attr, .. } => {
@@ -152,13 +155,17 @@ impl<'a> BasicTypeInfer<'a> {
                 decl.decl.ret_ty
             }
             ir::OPKind::Struct { fields } => {
-                let field_tys = fields.iter().map(|(s, var)| (*s, self.type_of(*var))).collect();
-                let struct_ty = ir::TypeID::insert_type(&mut self.ir, ir::TypeKind::Struct { fields: field_tys });
+                let field_tys = fields
+                    .iter()
+                    .map(|(s, var)| (*s, self.type_of(*var)))
+                    .collect();
+                let struct_ty = ir::TypeID::insert_type(
+                    &mut self.ir,
+                    ir::TypeKind::Struct { fields: field_tys },
+                );
                 struct_ty
             }
-            ir::OPKind::Constant { .. } => {
-                ir::TypeID::insert_type(&mut self.ir, ir::TypeKind::I32)
-            }
+            ir::OPKind::Constant { .. } => ir::TypeID::insert_type(&mut self.ir, ir::TypeKind::I32),
             _ => panic!("Unexpected op kind"),
         };
 
@@ -176,7 +183,11 @@ fn rewrite_var_types(ir: &mut ir::IR) {
         infer.type_of(id);
     }
 
-    let BasicTypeInfer { var_types, get_attr_idx, .. } = infer;
+    let BasicTypeInfer {
+        var_types,
+        get_attr_idx,
+        ..
+    } = infer;
     let var_ids = ir.iter_ids::<ir::VarID>().map(|x| x.0).collect::<Vec<_>>();
     for id in var_ids {
         let ty = var_types[&id];
@@ -196,11 +207,9 @@ fn rewrite_var_types(ir: &mut ir::IR) {
     }
 }
 
-
 pub fn transform_ir(ir: &mut ir::IR) {
     rewrite_var_types(ir);
 }
-
 
 #[cfg(test)]
 mod test_type_infer {
@@ -224,8 +233,11 @@ mod test_type_infer {
             }
             fn main() {
                 foo({a: 1, b: 2}, 3);
-            }".into(), 
-        None).unwrap();
+            }"
+            .into(),
+            None,
+        )
+        .unwrap();
 
         let mut _ir = crate::ast_to_ir(&ast).unwrap();
         // println!("{}", ir::print_basic(&_ir));
@@ -253,10 +265,9 @@ mod test_type_infer {
             type T = {a: i32, b: i32}
             fn main() {
                 S::foo({a: 1, b: {a: 2, b: 3}}, 4);
-            }"
+            }",
         );
         println!("{}", ir::print_basic(&_ir));
-
     }
 
     #[test]
@@ -268,8 +279,8 @@ mod test_type_infer {
                 let d = (b + 1);
                 return (c + d);
             }
-        ");
+        ",
+        );
         println!("{}", ir::print_basic(&_ir));
-
     }
 }

@@ -172,7 +172,7 @@ impl<'ir> BasicPrinter<'ir> {
                     )
                 );
             }
-            OPKind::GetAttr { obj, attr, idx, } => {
+            OPKind::GetAttr { obj, attr, idx } => {
                 return format!(
                     "{} = getattr[@{}, idx={:?}]({})",
                     self.print_var(op.res.unwrap()),

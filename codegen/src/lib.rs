@@ -17,7 +17,7 @@ use ir::IR;
 
 struct IRState<'ir> {
     ir: &'ir IR,
-    namer: ir::IRNamer
+    namer: ir::IRNamer,
 }
 
 struct CodeGenState<'ctx> {
@@ -48,7 +48,7 @@ impl<'ctx> CodeGenState<'ctx> {
     fn get_var_type<'ir>(&mut self, ir: &IRState<'ir>, var: ir::VarID) -> BasicTypeEnum<'ctx> {
         self.get_type(ir, var.type_of(&ir.ir))
     }
-    
+
     fn load_var<'ir>(&mut self, ir: &IRState<'ir>, var: ir::VarID) -> BasicValueEnum<'ctx> {
         let ptr = self.var_ids[&var];
         let pointee_ty = self.get_var_type(ir, var);
@@ -56,23 +56,29 @@ impl<'ctx> CodeGenState<'ctx> {
     }
 }
 
-fn generate_llvm_type<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, ty_id: ir::TypeID) -> BasicTypeEnum<'ctx> {
+fn generate_llvm_type<'ctx, 'ir>(
+    code: &mut CodeGenState<'ctx>,
+    ir: &IRState<'ir>,
+    ty_id: ir::TypeID,
+) -> BasicTypeEnum<'ctx> {
     let ty_decl = ir.ir.get_unique(ty_id).unwrap();
     let res = match &ty_decl.kind {
         ir::TypeKind::Struct { fields } => {
             let struct_ty = code.context.struct_type(
-                &fields.iter().map(|&ty| 
-                    generate_llvm_type(code, ir, ty.1).into()).collect::<Vec<_>>(),
-                false
+                &fields
+                    .iter()
+                    .map(|&ty| generate_llvm_type(code, ir, ty.1).into())
+                    .collect::<Vec<_>>(),
+                false,
             );
             struct_ty.into()
         }
-        ir::TypeKind::Decl { decl } => {
-            code.context.get_struct_type(&ir.namer.name_type(*decl)).unwrap().into()
-        }
-        ir::TypeKind::I32 => {
-            code.context.i32_type().into()
-        }
+        ir::TypeKind::Decl { decl } => code
+            .context
+            .get_struct_type(&ir.namer.name_type(*decl))
+            .unwrap()
+            .into(),
+        ir::TypeKind::I32 => code.context.i32_type().into(),
         ir::TypeKind::Void => {
             panic!("void type not allowed here");
         }
@@ -87,13 +93,18 @@ fn codegen_type_decls<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir
     }
 
     for (ty_id, decl) in ir.ir.iter_ids::<ir::TypeDeclID>() {
-        let llvm_ty = code.context.get_struct_type(&ir.namer.name_type(ty_id)).unwrap();
+        let llvm_ty = code
+            .context
+            .get_struct_type(&ir.namer.name_type(ty_id))
+            .unwrap();
         let ty = ir.ir.get_unique(decl.decl).unwrap();
         if let ir::TypeKind::Struct { fields } = &ty.kind {
             llvm_ty.set_body(
-                &fields.iter().map(|&ty| 
-                    generate_llvm_type(code, ir, ty.1).into()).collect::<Vec<_>>(),
-                false
+                &fields
+                    .iter()
+                    .map(|&ty| generate_llvm_type(code, ir, ty.1).into())
+                    .collect::<Vec<_>>(),
+                false,
             );
         } else {
             panic!("only struct types allowed here");
@@ -104,23 +115,28 @@ fn codegen_type_decls<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir
 fn codegen_fn<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
     for (func_id, func) in ir.ir.iter_ids::<ir::FuncID>() {
         let fn_type;
-        let arg_types = func.decl.args.iter().map(|&(_, ty)| code.get_type(ir, ty).into()).collect::<Vec<_>>();
+        let arg_types = func
+            .decl
+            .args
+            .iter()
+            .map(|&(_, ty)| code.get_type(ir, ty).into())
+            .collect::<Vec<_>>();
         if func.decl.ret_ty == ir::TypeID::insert_type(&ir.ir, ir::TypeKind::Void) {
-            fn_type = code.context.void_type().fn_type(
-                &arg_types,
-                false
-            );
+            fn_type = code.context.void_type().fn_type(&arg_types, false);
         } else {
-            fn_type = code.get_type(ir, func.decl.ret_ty).fn_type(
-                &arg_types,
-                false
-            );
+            fn_type = code
+                .get_type(ir, func.decl.ret_ty)
+                .fn_type(&arg_types, false);
         }
-        code.module.add_function(&ir.namer.name_func(func_id), fn_type, None);
+        code.module
+            .add_function(&ir.namer.name_func(func_id), fn_type, None);
     }
 
     for (func_id, func) in ir.ir.iter_ids::<ir::FuncID>() {
-        let llvm_func = code.module.get_function(ir.namer.name_func(func_id)).unwrap();
+        let llvm_func = code
+            .module
+            .get_function(ir.namer.name_func(func_id))
+            .unwrap();
         let entry = code.context.append_basic_block(llvm_func, "entry");
         code.builder.position_at_end(entry);
         for (i, arg) in llvm_func.get_param_iter().enumerate() {
@@ -136,7 +152,8 @@ fn codegen_fn<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
 
 fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, op: ir::OPID) {
     let op = ir.ir.get(op).unwrap();
-    match &op.kind { // every var corresponds to a stack pointer
+    match &op.kind {
+        // every var corresponds to a stack pointer
         ir::OPKind::Constant { value } => {
             let const_val = code.context.i32_type().const_int(*value as u64, false);
             let var = code.new_stack_var(ir, op.res.unwrap());
@@ -146,26 +163,42 @@ fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, op: i
         ir::OPKind::Add { lhs, rhs } => {
             let lhs_llvm = code.load_var(ir, *lhs);
             let rhs_llvm = code.load_var(ir, *rhs);
-            
+
             let res_ptr = code.new_stack_var(ir, op.res.unwrap());
-            let res_val = code.builder.build_int_add(lhs_llvm.into_int_value(), rhs_llvm.into_int_value(), "").unwrap();
+            let res_val = code
+                .builder
+                .build_int_add(lhs_llvm.into_int_value(), rhs_llvm.into_int_value(), "")
+                .unwrap();
             code.builder.build_store(res_ptr, res_val).unwrap();
         }
         ir::OPKind::Call { func, args } => {
-            let func = code.module.get_function(&ir.namer.name_func(*func)).unwrap();
-            let args = args.iter().enumerate().map(|(i, &arg)| {
-                let arg_val = code.load_var(ir, arg);
-                let arg_ty = arg_val.get_type();
-                let expected_arg_ty = func.get_nth_param(i as u32).unwrap().get_type();
-                if arg_ty != expected_arg_ty {
-                    panic!("expected arg type {:?}, got {:?}", expected_arg_ty, arg_ty);
-                }
-                arg_val.into()
-            }).collect::<Vec<_>>();
+            let func = code
+                .module
+                .get_function(&ir.namer.name_func(*func))
+                .unwrap();
+            let args = args
+                .iter()
+                .enumerate()
+                .map(|(i, &arg)| {
+                    let arg_val = code.load_var(ir, arg);
+                    let arg_ty = arg_val.get_type();
+                    let expected_arg_ty = func.get_nth_param(i as u32).unwrap().get_type();
+                    if arg_ty != expected_arg_ty {
+                        panic!("expected arg type {:?}, got {:?}", expected_arg_ty, arg_ty);
+                    }
+                    arg_val.into()
+                })
+                .collect::<Vec<_>>();
             let res_ptr = code.new_stack_var(ir, op.res.unwrap());
-            let res_val = code.builder.build_call(func, &args, "call").unwrap().try_as_basic_value();
+            let res_val = code
+                .builder
+                .build_call(func, &args, "call")
+                .unwrap()
+                .try_as_basic_value();
             if res_val.is_left() {
-                code.builder.build_store(res_ptr, res_val.left().unwrap()).unwrap();
+                code.builder
+                    .build_store(res_ptr, res_val.left().unwrap())
+                    .unwrap();
             }
         }
         ir::OPKind::GetAttr { obj, idx, .. } => {
@@ -173,7 +206,10 @@ fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, op: i
             let obj_ty = code.get_var_type(ir, *obj).into_struct_type();
             let res_ty = code.get_var_type(ir, op.res.unwrap());
             let idx = idx.unwrap();
-            let field = code.builder.build_struct_gep(obj_ty, obj_val, idx as u32, "").unwrap();
+            let field = code
+                .builder
+                .build_struct_gep(obj_ty, obj_val, idx as u32, "")
+                .unwrap();
             let field_val = code.builder.build_load(res_ty, field, "").unwrap();
             let res_ptr = code.new_stack_var(ir, op.res.unwrap());
             code.builder.build_store(res_ptr, field_val).unwrap();
@@ -184,11 +220,16 @@ fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, op: i
         }
         ir::OPKind::Struct { fields } => {
             let res = code.new_stack_var(ir, op.res.unwrap());
-            let struct_ty = code.get_type(ir, op.res.unwrap().type_of(&ir.ir)).into_struct_type();
+            let struct_ty = code
+                .get_type(ir, op.res.unwrap().type_of(&ir.ir))
+                .into_struct_type();
             for (i, (_, field)) in fields.iter().enumerate() {
                 let field_val = code.load_var(ir, *field);
-                let field_ptr = code.builder.build_struct_gep(struct_ty, res, i as u32, "").unwrap();
-                code.builder.build_store(field_ptr, field_val).unwrap();                
+                let field_ptr = code
+                    .builder
+                    .build_struct_gep(struct_ty, res, i as u32, "")
+                    .unwrap();
+                code.builder.build_store(field_ptr, field_val).unwrap();
             }
         }
         ir::OPKind::Assign { lhs, rhs } => {
@@ -198,8 +239,6 @@ fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, op: i
         }
     }
 }
-
-
 
 /// TODO:
 /// - disallow recursive and mutually recursive types
@@ -226,7 +265,6 @@ pub fn generate_llvm(ir: &ir::IR) -> Result<String> {
 
     codegen_type_decls(&mut codegen, &ir_state);
     codegen_fn(&mut codegen, &ir_state);
-
 
     // codegen.codegen(ir)?;
     Ok(codegen.module.to_string())
@@ -280,7 +318,7 @@ mod tests {
         passes::PassBuilderOptions,
         targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine},
     };
-    
+
     fn run_passes_on(module: &Module) {
         Target::initialize_all(&InitializationConfig::default());
         let target_triple = TargetMachine::get_default_triple();
@@ -295,7 +333,7 @@ mod tests {
                 CodeModel::Default,
             )
             .unwrap();
-    
+
         let passes: &[&str] = &[
             "instcombine",
             "reassociate",
@@ -304,7 +342,7 @@ mod tests {
             // "basic-aa",
             "mem2reg",
         ];
-    
+
         module
             .run_passes(
                 passes.join(",").as_str(),
@@ -312,7 +350,7 @@ mod tests {
                 PassBuilderOptions::create(),
             )
             .unwrap();
-    
+
         // let t = target_machine
         //     .write_to_memory_buffer(module, inkwell::targets::FileType::Assembly)
         //     .unwrap();
@@ -344,7 +382,10 @@ mod tests {
         let y = builder.build_load(ty, s, "load").unwrap();
         builder.build_return(Some(&y)).unwrap();
 
-        let fn_ty = ty.fn_type(&[context.f128_type().into(), context.i32_type().into()], false);
+        let fn_ty = ty.fn_type(
+            &[context.f128_type().into(), context.i32_type().into()],
+            false,
+        );
         let func = module.add_function("bar", fn_ty, None);
         let entry = context.append_basic_block(func, "entry");
         let builder = context.create_builder();
@@ -371,12 +412,14 @@ mod tests {
 
     #[test]
     fn test_codegen1() {
-        let ir = run_frontend("\
+        let ir = run_frontend(
+            "\
             type T = {a: i32, b: i32}
             fn foo(a: T, b: i32): i32 {
                 return (a.a + b);
             }
-        ");
+        ",
+        );
 
         // println!("{}", ir::print_basic(&ir));
 
@@ -386,22 +429,24 @@ mod tests {
 
     #[test]
     fn test_codegen2() {
-        let ir = run_frontend("\
+        let ir = run_frontend(
+            "\
             fn bar(a: i32, b: i32): i32 {
                 let c = (a + 1);
                 let d = (b + 1);
                 return (c + d);
             }
-        ");
+        ",
+        );
 
         let llvm = generate_llvm(&ir).unwrap();
         println!("{}", llvm);
     }
 
-    
     #[test]
     fn test_codegen3() {
-        let ir = run_frontend("\
+        let ir = run_frontend(
+            "\
             type T = {a: i32, b: i32}
             type R = {a: T}
             fn foo(a: T): i32 {
@@ -419,10 +464,10 @@ mod tests {
                 foo(a);
 
             }
-        ");
+        ",
+        );
         println!("{}", ir::print_basic(&ir));
         // let llvm = generate_llvm(&ir).unwrap();
         // println!("{}", llvm);
     }
-
 }

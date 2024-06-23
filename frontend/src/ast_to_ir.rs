@@ -614,6 +614,4 @@ mod ast_to_ir_test {
         let _ir = ast_to_ir(&ast).unwrap();
         println!("{}", ir::print_basic(&_ir));
     }
-
-    
 }

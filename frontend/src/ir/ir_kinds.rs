@@ -1,9 +1,8 @@
 use std::any::Any;
 use std::hash::Hash;
 
-
 pub use super::registry::NodeID;
-use super::registry::{Registry, GenericUniqueRegistry};
+use super::registry::{GenericUniqueRegistry, Registry};
 use crate::ast::Span;
 
 pub struct IR {
@@ -141,7 +140,9 @@ impl SymbolID {
     }
 
     pub fn insert_symbol(ir: &IR, name: &str) -> SymbolID {
-        ir.insert_unique(Symbol { name: name.to_string() })
+        ir.insert_unique(Symbol {
+            name: name.to_string(),
+        })
     }
 }
 
@@ -170,7 +171,12 @@ impl VarID {
         var.name.get_str(ir).unwrap()
     }
 
-    pub fn new_var(ir: &IR, name: Option<SymbolID>, ty: Option<TypeID>, span: Option<Span>) -> VarID {
+    pub fn new_var(
+        ir: &IR,
+        name: Option<SymbolID>,
+        ty: Option<TypeID>,
+        span: Option<Span>,
+    ) -> VarID {
         let name = name.unwrap_or_else(|| SymbolID::insert_symbol(ir, ""));
         let id = ir.temporary_id();
         ir.insert(Var { id, name, ty, span })

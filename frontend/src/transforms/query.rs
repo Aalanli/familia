@@ -46,7 +46,6 @@ impl Hash for dyn DefaultIdentity {
     }
 }
 
-
 pub trait Query: DefaultIdentity + Hash + Eq + Clone {
     type Result: Clone;
     fn query(&self, q: &QueryAnalysis) -> Self::Result;
@@ -62,7 +61,7 @@ pub use QueryError::*;
 pub struct QueryAnalysis<'ir> {
     ir: &'ir ir::IR,
     query: RefCell<HashMap<Box<dyn DefaultIdentity>, Box<dyn Any>>>,
-    current_queries: RefCell<HashSet<Box<dyn DefaultIdentity>>>
+    current_queries: RefCell<HashSet<Box<dyn DefaultIdentity>>>,
 }
 
 impl<'ir> QueryAnalysis<'ir> {
@@ -76,7 +75,7 @@ impl<'ir> QueryAnalysis<'ir> {
 
     pub fn query<T>(&self, q: T) -> Result<T::Result, QueryError>
     where
-        T: Query
+        T: Query,
     {
         let qr: &dyn DefaultIdentity = &q;
         if let Some(result) = self.query.borrow().get(qr) {
@@ -89,7 +88,9 @@ impl<'ir> QueryAnalysis<'ir> {
         self.current_queries.borrow_mut().insert(Box::new(nq));
         let result = q.query(self);
         self.current_queries.borrow_mut().remove(qr);
-        self.query.borrow_mut().insert(Box::new(q), Box::new(result.clone()));
+        self.query
+            .borrow_mut()
+            .insert(Box::new(q), Box::new(result.clone()));
         Ok(result)
     }
 
@@ -111,7 +112,8 @@ pub struct QueryAnalysisResult {
 impl QueryAnalysisResult {
     pub fn get<T: Query>(&self, q: &T) -> Option<T::Result> {
         let qr: &dyn DefaultIdentity = q;
-        self.query.get(qr).and_then(|x| x.downcast_ref::<T::Result>().cloned())
+        self.query
+            .get(qr)
+            .and_then(|x| x.downcast_ref::<T::Result>().cloned())
     }
 }
-
