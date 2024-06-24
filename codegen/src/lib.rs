@@ -5,6 +5,7 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::execution_engine::{ExecutionEngine, JitFunction};
 use inkwell::module::Module;
+use inkwell::passes::PassManagerSubType;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValueEnum, PointerValue};
 use inkwell::OptimizationLevel;
@@ -147,6 +148,9 @@ fn codegen_fn<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
         for op in &func.body {
             codegen_op(code, ir, *op);
         }
+        if func.decl.ret_ty == ir::TypeID::insert_type(&ir.ir, ir::TypeKind::Void) {
+            code.builder.build_return(None).unwrap();
+        }
     }
 }
 
@@ -180,12 +184,18 @@ fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, op: i
                 .iter()
                 .enumerate()
                 .map(|(i, &arg)| {
-                    let arg_val = code.load_var(ir, arg);
-                    let arg_ty = arg_val.get_type();
+                    let ptr = code.var_ids[&arg];
+
+
+                    // let arg_ty = arg_val.get_type();
+                    // ignore the actual type of var for now
                     let expected_arg_ty = func.get_nth_param(i as u32).unwrap().get_type();
-                    if arg_ty != expected_arg_ty {
-                        panic!("expected arg type {:?}, got {:?}", expected_arg_ty, arg_ty);
-                    }
+                    let arg_val = code.builder.build_load(expected_arg_ty, ptr, "").unwrap();
+                    
+
+                    // if arg_ty != expected_arg_ty {
+                    //     panic!("expected arg type {:?}, got {:?}", expected_arg_ty, arg_ty);
+                    // }
                     arg_val.into()
                 })
                 .collect::<Vec<_>>();
@@ -244,6 +254,54 @@ fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, op: i
 /// - disallow recursive and mutually recursive types
 /// - remove void types from everywhere except function returns, or just make it a char
 /// - only have stack allocated types
+use inkwell::{
+    passes::PassBuilderOptions,
+    passes::PassManager,
+    targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine},
+};
+
+fn run_passes_on(module: &Module) {
+    Target::initialize_all(&InitializationConfig::default());
+    let target_triple = TargetMachine::get_default_triple();
+    let target = Target::from_triple(&target_triple).unwrap();
+    let target_machine = target
+        .create_target_machine(
+            &target_triple,
+            "generic",
+            "",
+            OptimizationLevel::Default,
+            RelocMode::PIC,
+            CodeModel::Default,
+        )
+        .unwrap();
+    
+    
+    let passes: &[&str] = &[
+        // "instcombine",
+        // "reassociate",
+        // "gvn",
+        // "simplifycfg",
+        // // "basic-aa",
+        // "mem2reg",
+        "default<O1>"
+    ];
+
+    
+
+    module
+        .run_passes(
+            passes.join(",").as_str(),
+            &target_machine,
+            PassBuilderOptions::create(),
+        )
+        .unwrap();
+
+    // let t = target_machine
+    //     .write_to_memory_buffer(module, inkwell::targets::FileType::Assembly)
+    //     .unwrap();
+    // println!("{}", String::from_utf8(t.as_slice().to_vec()).unwrap());
+}
+
 
 pub fn generate_llvm(ir: &ir::IR) -> Result<String> {
     let context = Context::create();
@@ -267,6 +325,8 @@ pub fn generate_llvm(ir: &ir::IR) -> Result<String> {
     codegen_fn(&mut codegen, &ir_state);
 
     // codegen.codegen(ir)?;
+    run_passes_on(&codegen.module);
+    
     Ok(codegen.module.to_string())
 }
 
@@ -314,49 +374,8 @@ mod tests {
         // println!("{}", module_str);
     }
 
-    use inkwell::{
-        passes::PassBuilderOptions,
-        targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine},
-    };
-
-    fn run_passes_on(module: &Module) {
-        Target::initialize_all(&InitializationConfig::default());
-        let target_triple = TargetMachine::get_default_triple();
-        let target = Target::from_triple(&target_triple).unwrap();
-        let target_machine = target
-            .create_target_machine(
-                &target_triple,
-                "generic",
-                "",
-                OptimizationLevel::Aggressive,
-                RelocMode::PIC,
-                CodeModel::Default,
-            )
-            .unwrap();
-
-        let passes: &[&str] = &[
-            "instcombine",
-            "reassociate",
-            "gvn",
-            "simplifycfg",
-            // "basic-aa",
-            "mem2reg",
-        ];
-
-        module
-            .run_passes(
-                passes.join(",").as_str(),
-                &target_machine,
-                PassBuilderOptions::create(),
-            )
-            .unwrap();
-
-        // let t = target_machine
-        //     .write_to_memory_buffer(module, inkwell::targets::FileType::Assembly)
-        //     .unwrap();
-        // println!("{}", String::from_utf8(t.as_slice().to_vec()).unwrap());
-    }
-
+    
+    
     #[test]
     fn test_arg_ty() {
         let context = Context::create();
@@ -467,7 +486,7 @@ mod tests {
         ",
         );
         println!("{}", ir::print_basic(&ir));
-        // let llvm = generate_llvm(&ir).unwrap();
-        // println!("{}", llvm);
+        let llvm = generate_llvm(&ir).unwrap();
+        println!("{}", llvm);
     }
 }
