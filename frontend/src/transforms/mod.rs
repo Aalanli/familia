@@ -1,8 +1,6 @@
 use std::{
-    any::Any,
     collections::{HashMap, HashSet},
     hash::Hash,
-    iter::Cycle,
 };
 
 use crate::query::*;
@@ -31,37 +29,6 @@ impl VarParent {
     }
 }
 
-pub fn check_cycle(ir: &ir::IR, ty_id: ir::TypeID, visited: &mut HashSet<ir::TypeID>) -> bool {
-    if visited.contains(&ty_id) {
-        return true;
-    }
-    visited.insert(ty_id);
-    let ty = ir.get_unique(ty_id).unwrap();
-    let cycle = match &ty.kind {
-        ir::TypeKind::I32 => false,
-        ir::TypeKind::Void => false,
-        ir::TypeKind::Struct { fields } => {
-            for (_, field_ty) in fields {
-                if visited.contains(&field_ty) {
-                    return true;
-                }
-
-                visited.insert(*field_ty);
-                if check_cycle(ir, *field_ty, visited) {
-                    return true;
-                }
-                visited.remove(&field_ty);
-            }
-            false
-        }
-        ir::TypeKind::Decl { decl } => {
-            let decl = ir.get(*decl).unwrap();
-            check_cycle(ir, decl.decl, visited)
-        }
-    };
-    visited.remove(&ty_id);
-    cycle
-}
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct ContainsCycle(ir::TypeID);
@@ -87,13 +54,59 @@ impl Query for ContainsCycle {
             }
             ir::TypeKind::Decl { decl } => {
                 let decl = ir.get(*decl).unwrap();
-                q.query(ContainsCycle(decl.decl)).map_err(|_| true).unwrap()
+                q.query(ContainsCycle(decl.decl)).map_or(true, |x| x)
             }
         }
     }
 }
 
-pub fn flatten_typedecl(ir: &mut ir::IR) {}
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct InlinedType(ir::TypeID);
+
+impl Query for InlinedType {
+    type Result = ir::TypeID;
+
+    fn query(&self, q: &QueryAnalysis) -> Self::Result {
+        let ir = q.ir();
+        let ty = ir.get_unique(self.0).unwrap();
+        match &ty.kind {
+            ir::TypeKind::I32 => self.0,
+            ir::TypeKind::Void => self.0,
+            ir::TypeKind::Struct { fields } => {
+                let field_tys = fields
+                    .iter()
+                    .map(|(s, ty)| (*s, q.query(InlinedType(*ty)).unwrap()))
+                    .collect();
+                ir::TypeID::insert_type(ir, ir::TypeKind::Struct { fields: field_tys })
+            }
+            ir::TypeKind::Decl { decl } => {
+                let decl = ir.get(*decl).unwrap();
+                q.query(InlinedType(decl.decl)).unwrap()
+            }
+        }
+    }
+}
+
+pub fn flatten_typedecl(ir: &mut ir::IR) {
+    let query = QueryAnalysis::new(ir);
+    let mut inlined = HashMap::new();
+    for (decl_id, ty) in ir.iter_ids::<ir::TypeDeclID>() {
+        let cycle = query.query(ContainsCycle(ty.decl)).map_or(true, |x| x);
+        assert!(
+            !cycle,
+            "Cycle detected in type {:?}",
+            ty.name.get_str(ir) 
+        );
+        let inlined_ty = query.query(InlinedType(ty.decl)).unwrap();
+        inlined.insert(decl_id, inlined_ty);
+    }
+
+    for decl_id in ir.iter_ids::<ir::TypeDeclID>().map(|x| x.0).collect::<Vec<_>>().into_iter() {
+        let inlined_ty = inlined[&decl_id];
+        let decl = ir.get_mut(decl_id).unwrap();
+        decl.decl = inlined_ty;
+    }
+}
 
 struct BasicTypeInfer<'a> {
     var_types: HashMap<ir::VarID, ir::TypeID>,

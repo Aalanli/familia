@@ -207,6 +207,18 @@ pub struct Type {
 
 impl_id!(TypeDeclID, TypeDecl);
 
+impl TypeDeclID {
+    pub fn type_id(&self, ir: &IR) -> TypeID {
+        let decl = ir.get(*self).unwrap();
+        decl.decl
+    }
+
+    pub fn type_of<'a>(&self, ir: &'a IR) -> &'a Type {
+        let ty_id = ir.get(*self).unwrap().decl;
+        ir.get_unique(ty_id).unwrap()
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct TypeDecl {
     pub name: SymbolID,
