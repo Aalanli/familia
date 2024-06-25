@@ -150,6 +150,7 @@ extern {
         ";" => Tok::SemiColon,
         "," => Tok::Comma,
         Ident => Tok::Ident(<Ident>),
-        Int => Tok::Int(<i32>)
+        Int => Tok::Int(<i32>),
+        String => Tok::String(<String>)
     }
 }

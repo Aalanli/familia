@@ -22,6 +22,10 @@ int bar(struct R a) {
     return a.t.a + 1;
 }
 
+int baz(struct R* a) {
+    return a->t.a + 1;
+}
+
 int main() {
     struct T t;
     t.a = 1;

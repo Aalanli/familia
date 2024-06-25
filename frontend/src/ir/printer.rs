@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, hash::Hash};
+use std::{cell::RefCell, collections::HashMap};
 
 use super::*;
 
@@ -42,11 +42,7 @@ impl IRNamer {
 
     fn compute_id_name<T: ID>(ir: &IR, stable: bool) -> HashMap<T, u32> {
         let mut prefix_ids = HashMap::new();
-        let mut ids = ir.iter_ids::<T>().map(|x| x.0).collect::<Vec<_>>();
-        if stable {
-            ids.sort();
-        }
-        for (i, id) in ids.into_iter().enumerate() {
+        for (i, id) in ir.iter_stable::<T>().enumerate() {
             prefix_ids.insert(id, i as u32);
         }
         prefix_ids
@@ -100,7 +96,7 @@ impl<'ir> BasicPrinter<'ir> {
     }
 
     pub fn print_type(&self, ty: TypeID) -> String {
-        let ty = self.ir.get_unique(ty).unwrap();
+        let ty = self.ir.get(ty);
         match &ty.kind {
             TypeKind::Struct { fields } => {
                 return arg_list(
@@ -110,7 +106,7 @@ impl<'ir> BasicPrinter<'ir> {
                     fields.iter().map(|(name, ty)| {
                         format!(
                             "{}: {}",
-                            name.get_str(&self.ir).unwrap(),
+                            name.get_str(&self.ir),
                             self.print_type(*ty)
                         )
                     }),
@@ -129,13 +125,13 @@ impl<'ir> BasicPrinter<'ir> {
     }
 
     pub fn print_type_decl(&self, ty_id: TypeDeclID) -> String {
-        let ty = self.ir.get(ty_id).unwrap();
+        let ty = self.ir.get(ty_id);
         let decl = self.print_type(ty.decl);
         format!("type @{} = {}", self.ir_namer.name_type(ty_id), decl)
     }
 
     pub fn print_var(&self, var_id: VarID) -> String {
-        let var = self.ir.get(var_id).unwrap();
+        let var = self.ir.get(var_id);
         if var.ty.is_none() {
             return format!("%{}", self.ir_namer.name_var(var_id));
         }
@@ -144,7 +140,7 @@ impl<'ir> BasicPrinter<'ir> {
     }
 
     pub fn print_op(&self, op_id: &OPID) -> String {
-        let op = self.ir.get(*op_id).unwrap();
+        let op = self.ir.get(*op_id);
         let args;
         let name;
         match &op.kind {
@@ -176,7 +172,7 @@ impl<'ir> BasicPrinter<'ir> {
                 return format!(
                     "{} = getattr[@{}, idx={:?}]({})",
                     self.print_var(op.res.unwrap()),
-                    attr.get_str(&self.ir).unwrap(),
+                    attr.get_str(&self.ir),
                     idx,
                     self.print_var(*obj),
                 );
@@ -199,7 +195,7 @@ impl<'ir> BasicPrinter<'ir> {
     }
 
     pub fn print_function(&self, func_id: FuncID) -> String {
-        let func = self.ir.get(func_id).unwrap();
+        let func = self.ir.get(func_id);
         let args = arg_list(
             "(",
             ")",
@@ -219,7 +215,7 @@ impl<'ir> BasicPrinter<'ir> {
     }
 
     pub fn print_function_stub(&self, func: FuncID) -> String {
-        let fimpl = self.ir.get(func).unwrap();
+        let fimpl = self.ir.get(func);
         let args = arg_list(
             "(",
             ")",
@@ -227,7 +223,7 @@ impl<'ir> BasicPrinter<'ir> {
             fimpl.decl.args.iter().map(|(name, ty)| {
                 format!(
                     "{}: {}",
-                    name.get_str(&self.ir).unwrap(),
+                    name.get_str(&self.ir),
                     self.print_type(*ty)
                 )
             }),
@@ -238,7 +234,7 @@ impl<'ir> BasicPrinter<'ir> {
     }
 
     pub fn print_class(&self, class_id: ClassID) -> String {
-        let class = self.ir.get(class_id).unwrap();
+        let class = self.ir.get(class_id);
         let mut str = format!("class @{}", self.ir_namer.name_class(class_id));
         str += " {\n";
         for methods in class.methods.iter() {
@@ -252,15 +248,16 @@ impl<'ir> BasicPrinter<'ir> {
 
     pub fn print_ir(&self) -> String {
         let mut lines = Vec::new();
-        for (id, _) in self.ir.iter_ids::<TypeDeclID>() {
+        for id in self.ir.iter_stable::<TypeDeclID>() {
             lines.push(self.print_type_decl(id));
         }
-        for (id, _) in self.ir.iter_ids::<FuncID>() {
+        for id in self.ir.iter_stable::<FuncID>() {
             lines.push(self.print_function(id));
         }
-        for (id, _) in self.ir.iter_ids::<ClassID>() {
+        for id in self.ir.iter_stable::<ClassID>() {
             lines.push(self.print_class(id));
         }
+        lines.push(String::new());
         lines.join("\n")
     }
 }

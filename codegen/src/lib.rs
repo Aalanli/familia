@@ -1,16 +1,13 @@
-use std::any::Any;
 use std::collections::HashMap;
 
 use inkwell::builder::Builder;
 use inkwell::context::Context;
-use inkwell::execution_engine::{ExecutionEngine, JitFunction};
 use inkwell::module::Module;
-use inkwell::passes::PassManagerSubType;
-use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
+use inkwell::types::{AsTypeRef, BasicType, BasicTypeEnum, PointerType};
 use inkwell::values::{BasicValueEnum, PointerValue};
 use inkwell::OptimizationLevel;
 
-use anyhow::{Error, Result};
+use anyhow::Result;
 
 use familia_frontend as frontend;
 use familia_frontend::ir;
@@ -62,7 +59,7 @@ fn generate_llvm_type<'ctx, 'ir>(
     ir: &IRState<'ir>,
     ty_id: ir::TypeID,
 ) -> BasicTypeEnum<'ctx> {
-    let ty_decl = ir.ir.get_unique(ty_id).unwrap();
+    let ty_decl = ir.ir.get(ty_id);
     let res = match &ty_decl.kind {
         ir::TypeKind::Struct { fields } => {
             let struct_ty = code.context.struct_type(
@@ -89,16 +86,17 @@ fn generate_llvm_type<'ctx, 'ir>(
 }
 
 fn codegen_type_decls<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
-    for (ty_id, ..) in ir.ir.iter_ids::<ir::TypeDeclID>() {
+    for ty_id in ir.ir.iter_stable::<ir::TypeDeclID>() {
         code.context.opaque_struct_type(&ir.namer.name_type(ty_id));
     }
 
-    for (ty_id, decl) in ir.ir.iter_ids::<ir::TypeDeclID>() {
+    for ty_id in ir.ir.iter_stable::<ir::TypeDeclID>() {
+        let decl = ir.ir.get(ty_id);
         let llvm_ty = code
             .context
             .get_struct_type(&ir.namer.name_type(ty_id))
             .unwrap();
-        let ty = ir.ir.get_unique(decl.decl).unwrap();
+        let ty = ir.ir.get(decl.decl);
         if let ir::TypeKind::Struct { fields } = &ty.kind {
             llvm_ty.set_body(
                 &fields
@@ -114,7 +112,8 @@ fn codegen_type_decls<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir
 }
 
 fn codegen_fn<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
-    for (func_id, func) in ir.ir.iter_ids::<ir::FuncID>() {
+    for func_id in ir.ir.iter_stable::<ir::FuncID>() {
+        let func = ir.ir.get(func_id);
         let fn_type;
         let arg_types = func
             .decl
@@ -133,7 +132,8 @@ fn codegen_fn<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
             .add_function(&ir.namer.name_func(func_id), fn_type, None);
     }
 
-    for (func_id, func) in ir.ir.iter_ids::<ir::FuncID>() {
+    for func_id in ir.ir.iter::<ir::FuncID>() {
+        let func = ir.ir.get(func_id);
         let llvm_func = code
             .module
             .get_function(ir.namer.name_func(func_id))
@@ -155,7 +155,7 @@ fn codegen_fn<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
 }
 
 fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, op: ir::OPID) {
-    let op = ir.ir.get(op).unwrap();
+    let op = ir.ir.get(op);
     match &op.kind {
         // every var corresponds to a stack pointer
         ir::OPKind::Constant { value } => {
@@ -186,12 +186,10 @@ fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, op: i
                 .map(|(i, &arg)| {
                     let ptr = code.var_ids[&arg];
 
-
                     // let arg_ty = arg_val.get_type();
                     // ignore the actual type of var for now
                     let expected_arg_ty = func.get_nth_param(i as u32).unwrap().get_type();
                     let arg_val = code.builder.build_load(expected_arg_ty, ptr, "").unwrap();
-                    
 
                     // if arg_ty != expected_arg_ty {
                     //     panic!("expected arg type {:?}, got {:?}", expected_arg_ty, arg_ty);
@@ -256,7 +254,6 @@ fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, op: i
 /// - only have stack allocated types
 use inkwell::{
     passes::PassBuilderOptions,
-    passes::PassManager,
     targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine},
 };
 
@@ -274,19 +271,16 @@ fn run_passes_on(module: &Module) {
             CodeModel::Default,
         )
         .unwrap();
-    
-    
+
     let passes: &[&str] = &[
         // "instcombine",
         // "reassociate",
         // "gvn",
         // "simplifycfg",
-        // // "basic-aa",
+        // "basic-aa",
         // "mem2reg",
-        "default<O1>"
+        "default<O1>",
     ];
-
-    
 
     module
         .run_passes(
@@ -302,8 +296,18 @@ fn run_passes_on(module: &Module) {
     // println!("{}", String::from_utf8(t.as_slice().to_vec()).unwrap());
 }
 
+pub enum OptLevel {
+    None,
+    O1,
+}
 
-pub fn generate_llvm(ir: &ir::IR) -> Result<String> {
+impl Default for OptLevel {
+    fn default() -> Self {
+        OptLevel::None
+    }
+}
+
+pub fn generate_llvm(ir: &ir::IR, opt_level: OptLevel) -> Result<String> {
     let context = Context::create();
     let module = context.create_module("main");
     let builder = context.create_builder();
@@ -318,20 +322,31 @@ pub fn generate_llvm(ir: &ir::IR) -> Result<String> {
 
     let ir_state = IRState {
         ir,
-        namer: ir::IRNamer::new(ir, false),
+        namer: ir::IRNamer::new(ir, true),
     };
 
     codegen_type_decls(&mut codegen, &ir_state);
     codegen_fn(&mut codegen, &ir_state);
 
-    // codegen.codegen(ir)?;
-    run_passes_on(&codegen.module);
-    
+    if let OptLevel::O1 = opt_level {
+        run_passes_on(&codegen.module);
+    }
+
     Ok(codegen.module.to_string())
+}
+
+use inkwell::llvm_sys::core as core;
+fn make_pointer_type<'a>(ty: BasicTypeEnum<'a>) -> PointerType<'a> {
+    unsafe {
+        let ptr_ty = core::LLVMPointerType(ty.as_type_ref(), 0);
+        PointerType::new(ptr_ty)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use inkwell::AddressSpace;
+
     use super::*;
     #[test]
     fn test_struct() {
@@ -374,8 +389,6 @@ mod tests {
         // println!("{}", module_str);
     }
 
-    
-    
     #[test]
     fn test_arg_ty() {
         let context = Context::create();
@@ -422,6 +435,48 @@ mod tests {
         println!("{}", module_str);
     }
 
+    #[test]
+    fn test_merge_modules() {
+        let context = Context::create();
+        let module1 = context.create_module("test1");
+        let module2 = context.create_module("test2");
+
+        let ty = context.opaque_struct_type("footy");
+        let ptr_ty = make_pointer_type(ty.into());
+        
+        // let ty = context.ptr_type(AddressSpace::default());
+        
+        let fn_ty = context.void_type().fn_type(&[ptr_ty.into()], false);
+        module1.add_function("foo", fn_ty, Some(inkwell::module::Linkage::External));
+
+        let ty = context.struct_type(&[
+            context.i32_type().into(),
+            context.i32_type().into(),
+        ], false);
+        let ptr_ty = make_pointer_type(ty.into());
+        let fn_ty = context.void_type().fn_type(&[ptr_ty.into()], false);
+
+
+        let func = module2.add_function("foo", fn_ty, Some(inkwell::module::Linkage::External));
+        let entry = context.append_basic_block(func, "entry");
+        let builder = context.create_builder();
+        builder.position_at_end(entry);
+        let arg = func.get_first_param().unwrap();
+        let a = context.i32_type().const_int(1, false);
+        let i1 = builder.build_struct_gep(ty, arg.into_pointer_value(), 0, "i1").unwrap();
+        builder.build_store(i1, a).unwrap();
+
+        builder.build_return(None).unwrap();
+
+        println!("{}", module1.print_to_string().to_string());
+        println!("{}", module2.print_to_string().to_string());
+
+        module1.link_in_module(module2).unwrap();
+
+        println!("{}", module1.print_to_string().to_string());
+
+    }
+
     fn run_frontend(s: &str) -> ir::IR {
         let ast = frontend::parse(s.into(), None).unwrap();
         let mut ir = frontend::ast_to_ir(&ast).unwrap();
@@ -442,7 +497,7 @@ mod tests {
 
         // println!("{}", ir::print_basic(&ir));
 
-        let llvm = generate_llvm(&ir).unwrap();
+        let llvm = generate_llvm(&ir, Default::default()).unwrap();
         println!("{}", llvm);
     }
 
@@ -458,7 +513,7 @@ mod tests {
         ",
         );
 
-        let llvm = generate_llvm(&ir).unwrap();
+        let llvm = generate_llvm(&ir, Default::default()).unwrap();
         println!("{}", llvm);
     }
 
@@ -486,7 +541,7 @@ mod tests {
         ",
         );
         println!("{}", ir::print_basic(&ir));
-        let llvm = generate_llvm(&ir).unwrap();
+        let llvm = generate_llvm(&ir, Default::default()).unwrap();
         println!("{}", llvm);
     }
 }

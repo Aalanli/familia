@@ -94,7 +94,11 @@ impl<'ir> QueryAnalysis<'ir> {
         Ok(result)
     }
 
-    pub fn query_default<T>(&self, q: T, f: impl FnOnce() -> T::Result) -> Result<T::Result, QueryError>
+    pub fn query_default<T>(
+        &self,
+        q: T,
+        f: impl FnOnce() -> T::Result,
+    ) -> Result<T::Result, QueryError>
     where
         T: Query,
     {

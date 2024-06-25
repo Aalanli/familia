@@ -26,19 +26,33 @@ impl IR {
         self.registry.get_mut(id)
     }
 
-    pub fn get<I: ID>(&self, id: I) -> Option<&I::Node> {
-        let any = self.get_any(id.id())?;
-        any.downcast_ref::<I::Node>()
+    pub fn get<I: ID>(&self, id: I) -> &I::Node {
+        if I::IS_UNIQUE {
+            let res = self.unique_registry.get(id.id()).unwrap();
+            res.as_any().downcast_ref::<I::Node>().unwrap()
+        } else {
+            let any = self.get_any(id.id()).unwrap();
+            any.downcast_ref::<I::Node>().unwrap()
+        }
     }
 
-    pub fn get_mut<I: ID>(&mut self, id: I) -> Option<&mut I::Node> {
-        let any = self.get_any_mut(id.id())?;
-        any.downcast_mut::<I::Node>()
+    pub fn get_mut<I: ID>(&mut self, id: I) -> &mut I::Node {
+        if I::IS_UNIQUE {
+            panic!("Unique ID is not mutable");
+        } else {
+            let any = self.get_any_mut(id.id()).unwrap();
+            any.downcast_mut::<I::Node>().unwrap()
+        }
     }
 
     pub fn insert<I: ID>(&self, node: I::Node) -> I {
-        let id = self.registry.insert_boxed(Box::new(node));
-        I::new(id)
+        if I::IS_UNIQUE {
+            let id = self.unique_registry.insert(node);
+            I::new(id)
+        } else {
+            let id = self.registry.insert_boxed(Box::new(node));
+            I::new(id)
+        }
     }
 
     pub fn insert_with<I: ID>(&self, id: I, node: I::Node) {
@@ -46,129 +60,109 @@ impl IR {
     }
 
     pub fn temporary_id<I: ID>(&self) -> I {
-        I::new(self.registry.temporary_id())
+        if I::IS_UNIQUE {
+            I::new(self.unique_registry.temporary_id())
+        } else {
+            I::new(self.registry.temporary_id())
+        }
     }
 
-    pub fn get_unique<U: UniqueID>(&self, id: U) -> Option<&U::Node> {
-        let res = self.unique_registry.get(id.id())?;
-        res.as_any().downcast_ref::<U::Node>()
+    pub fn iter<I: ID>(&self) -> impl Iterator<Item = I> {
+        let mut ids = vec![];
+        if I::IS_UNIQUE {
+            self.unique_registry.for_each(|id| {
+                let node = self.unique_registry.get(id).unwrap().as_any().type_id() == std::any::TypeId::of::<I::Node>();
+                if node {
+                    ids.push(I::new(id));
+                }
+            });
+        } else {
+            self.registry.for_each(|id| {
+                let node = self.registry.get(id).unwrap().type_id() == std::any::TypeId::of::<I::Node>();
+                if node {
+                    ids.push(I::new(id));
+                }
+            });
+        }
+        ids.into_iter()
     }
 
-    pub fn insert_unique<U: UniqueID>(&self, node: U::Node) -> U {
-        let id = self.unique_registry.insert(node);
-        U::new(id)
-    }
-
-    pub fn insert_unique_with<U: UniqueID>(&self, id: U, node: U::Node) {
-        self.unique_registry.insert_with(id.id(), node).unwrap();
-    }
-
-    pub fn temporary_unique_id<U: UniqueID>(&self) -> U {
-        U::new(self.unique_registry.temporary_id())
-    }
-
-    pub fn iter_ids<I: ID>(&self) -> impl Iterator<Item = (I, &I::Node)> {
-        self.registry.iter().filter_map(|x| {
-            let node = self.get::<I>(I::new(x))?;
-            Some((I::new(x), node))
-        })
-    }
-
-    pub fn iter_unique_ids<U: UniqueID>(&self) -> impl Iterator<Item = (U, &U::Node)> {
-        self.unique_registry.iter().filter_map(|x| {
-            let node = self.get_unique::<U>(U::new(x))?;
-            Some((U::new(x), node))
-        })
+    pub fn iter_stable<I: ID>(&self) -> impl Iterator<Item = I> {
+        let mut ids = self.iter::<I>().collect::<Vec<_>>();
+        ids.sort_by_key(|x| x.id());
+        ids.into_iter()
     }
 }
+
 
 pub trait ID: Copy + Eq + Ord + Hash {
-    type Node: 'static;
-    fn new(node: NodeID) -> Self;
-    fn id(self) -> NodeID;
-}
-
-pub trait UniqueID: Copy + Eq + Ord + Hash {
     type Node: Hash + Eq + 'static;
+    const IS_UNIQUE: bool;
+    fn id(&self) -> NodeID;
     fn new(node: NodeID) -> Self;
-    fn id(self) -> NodeID;
 }
 
 macro_rules! impl_id {
-    ($id:ident, $node:ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+    ($id:ident, $node:ident, $unique:ident) => {
+        #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $id(NodeID);
 
         impl ID for $id {
             type Node = $node;
+            const IS_UNIQUE: bool = $unique;
+            fn id(&self) -> NodeID {
+                self.0
+            }
+
             fn new(node: NodeID) -> Self {
                 $id(node)
-            }
-            fn id(self) -> NodeID {
-                self.0
             }
         }
     };
 }
 
-macro_rules! impl_unique_id {
-    ($id:ident, $node:ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-        pub struct $id(NodeID);
 
-        impl UniqueID for $id {
-            type Node = $node;
-            fn new(node: NodeID) -> Self {
-                $id(node)
-            }
-            fn id(self) -> NodeID {
-                self.0
-            }
-        }
-    };
-}
-
-impl_unique_id!(SymbolID, Symbol);
+impl_id!(SymbolID, Symbol, true);
 
 impl SymbolID {
-    pub fn get_symbol<'a>(&self, ir: &'a IR) -> Option<&'a Symbol> {
-        ir.get_unique(*self)
+    pub fn get_symbol<'a>(&self, ir: &'a IR) -> &'a Symbol {
+        ir.get(*self)
     }
 
-    pub fn get_str<'a>(&self, ir: &'a IR) -> Option<&'a str> {
-        Some(&self.get_symbol(ir)?.name)
+    pub fn get_str<'a>(&self, ir: &'a IR) -> &'a str {
+        &self.get_symbol(ir).name
     }
 
     pub fn insert_symbol(ir: &IR, name: &str) -> SymbolID {
-        ir.insert_unique(Symbol {
+        ir.insert(Symbol {
             name: name.to_string(),
         })
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Symbol {
     pub name: String,
 }
 
-impl_id!(PathID, Path);
+impl_id!(PathID, Path, false);
 
-#[derive(Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Path {
     pub symbols: Vec<SymbolID>,
     pub span: Span,
 }
 
-impl_id!(VarID, Var);
+impl_id!(VarID, Var, false);
 
 impl VarID {
     pub fn type_of(&self, ir: &IR) -> TypeID {
-        ir.get(*self).unwrap().ty.unwrap()
+        ir.get(*self).ty.unwrap()
     }
 
     pub fn name_of<'ir>(&self, ir: &'ir IR) -> &'ir str {
-        let var = ir.get(*self).unwrap();
-        var.name.get_str(ir).unwrap()
+        let var = ir.get(*self);
+        var.name.get_str(ir)
     }
 
     pub fn new_var(
@@ -183,7 +177,7 @@ impl VarID {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Var {
     pub id: VarID,
     pub name: SymbolID,
@@ -192,41 +186,41 @@ pub struct Var {
     // pub decl_ty_path: Option<PathID>,
 }
 
-impl_unique_id!(TypeID, Type);
+impl_id!(TypeID, Type, true);
 
 impl TypeID {
     pub fn insert_type(ir: &IR, kind: TypeKind) -> TypeID {
-        ir.insert_unique(Type { kind })
+        ir.insert(Type { kind })
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Type {
     pub kind: TypeKind,
 }
 
-impl_id!(TypeDeclID, TypeDecl);
+impl_id!(TypeDeclID, TypeDecl, false);
 
 impl TypeDeclID {
     pub fn type_id(&self, ir: &IR) -> TypeID {
-        let decl = ir.get(*self).unwrap();
+        let decl = ir.get(*self);
         decl.decl
     }
 
     pub fn type_of<'a>(&self, ir: &'a IR) -> &'a Type {
-        let ty_id = ir.get(*self).unwrap().decl;
-        ir.get_unique(ty_id).unwrap()
+        let ty_id = ir.get(*self).decl;
+        ir.get(ty_id)
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeDecl {
     pub name: SymbolID,
     pub decl: TypeID,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TypeKind {
     I32,
     Void,
@@ -240,25 +234,25 @@ impl Default for TypeKind {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FuncDecl {
     pub name: SymbolID,
     pub args: Vec<(SymbolID, TypeID)>,
     pub ret_ty: TypeID,
 }
 
-impl_id!(FuncID, FuncImpl);
+impl_id!(FuncID, FuncImpl, false);
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FuncImpl {
     pub decl: FuncDecl,
     pub vars: Vec<VarID>,
     pub body: Vec<OPID>,
 }
 
-impl_id!(OPID, OP);
+impl_id!(OPID, OP, false);
 
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OP {
     pub id: OPID,
     pub kind: OPKind,
@@ -266,7 +260,7 @@ pub struct OP {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OPKind {
     GetAttr {
         obj: VarID,
@@ -297,15 +291,15 @@ pub enum OPKind {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ClassDecl {
     pub name: SymbolID,
     pub repr_ty: TypeID,
 }
 
-impl_id!(ClassID, ClassImpl);
+impl_id!(ClassID, ClassImpl, false);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ClassImpl {
     pub decl: ClassDecl,
     pub methods: Vec<FuncID>,

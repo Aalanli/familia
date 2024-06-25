@@ -1,10 +1,10 @@
 use anyhow::{anyhow, Error};
 
-pub mod query;
 pub mod ast;
 mod ast_to_ir;
 pub mod ir;
 mod parser;
+pub mod query;
 pub mod transforms;
 
 pub use ir::IR;
@@ -36,7 +36,7 @@ impl Program {
 
 pub enum ErrorType {
     Error,
-    Warning
+    Warning,
 }
 
 pub struct ProgramError {
@@ -66,7 +66,7 @@ pub struct ErrorManager {
 }
 
 impl ErrorManager {
-    pub fn new() -> Self { 
+    pub fn new() -> Self {
         todo!()
     }
 

@@ -15,8 +15,8 @@ impl VarParent {
     pub fn new(ir: &ir::IR) -> Self {
         let mut var_parent = HashMap::new();
 
-        for (id, op) in ir.iter_ids::<ir::OPID>() {
-            if let Some(v) = op.res {
+        for id in ir.iter::<ir::OPID>() {
+            if let Some(v) = ir.get(id).res {
                 var_parent.insert(v, id);
             }
         }
@@ -29,7 +29,6 @@ impl VarParent {
     }
 }
 
-
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct ContainsCycle(ir::TypeID);
 
@@ -38,7 +37,7 @@ impl Query for ContainsCycle {
 
     fn query(&self, q: &QueryAnalysis) -> Self::Result {
         let ir = q.ir();
-        let ty = ir.get_unique(self.0).unwrap();
+        let ty = ir.get(self.0);
         match &ty.kind {
             ir::TypeKind::I32 => false,
             ir::TypeKind::Void => false,
@@ -53,7 +52,7 @@ impl Query for ContainsCycle {
                 false
             }
             ir::TypeKind::Decl { decl } => {
-                let decl = ir.get(*decl).unwrap();
+                let decl = ir.get(*decl);
                 q.query(ContainsCycle(decl.decl)).map_or(true, |x| x)
             }
         }
@@ -68,7 +67,7 @@ impl Query for InlinedType {
 
     fn query(&self, q: &QueryAnalysis) -> Self::Result {
         let ir = q.ir();
-        let ty = ir.get_unique(self.0).unwrap();
+        let ty = ir.get(self.0);
         match &ty.kind {
             ir::TypeKind::I32 => self.0,
             ir::TypeKind::Void => self.0,
@@ -80,7 +79,7 @@ impl Query for InlinedType {
                 ir::TypeID::insert_type(ir, ir::TypeKind::Struct { fields: field_tys })
             }
             ir::TypeKind::Decl { decl } => {
-                let decl = ir.get(*decl).unwrap();
+                let decl = ir.get(*decl);
                 q.query(InlinedType(decl.decl)).unwrap()
             }
         }
@@ -90,20 +89,18 @@ impl Query for InlinedType {
 pub fn flatten_typedecl(ir: &mut ir::IR) {
     let query = QueryAnalysis::new(ir);
     let mut inlined = HashMap::new();
-    for (decl_id, ty) in ir.iter_ids::<ir::TypeDeclID>() {
+    for decl_id in ir.iter::<ir::TypeDeclID>() {
+        let ty = ir.get(decl_id);
         let cycle = query.query(ContainsCycle(ty.decl)).map_or(true, |x| x);
-        assert!(
-            !cycle,
-            "Cycle detected in type {:?}",
-            ty.name.get_str(ir) 
-        );
+        assert!(!cycle, "Cycle detected in type {:?}", ty.name.get_str(ir));
         let inlined_ty = query.query(InlinedType(ty.decl)).unwrap();
         inlined.insert(decl_id, inlined_ty);
     }
 
-    for decl_id in ir.iter_ids::<ir::TypeDeclID>().map(|x| x.0).collect::<Vec<_>>().into_iter() {
+    for decl_id in ir.iter::<ir::TypeDeclID>()
+    {
         let inlined_ty = inlined[&decl_id];
-        let decl = ir.get_mut(decl_id).unwrap();
+        let decl = ir.get_mut(decl_id);
         decl.decl = inlined_ty;
     }
 }
@@ -130,7 +127,7 @@ impl<'a> BasicTypeInfer<'a> {
         if let Some(ty) = self.var_types.get(&id) {
             return *ty;
         }
-        let var = self.ir.get(id).unwrap();
+        let var = self.ir.get(id);
         if let Some(ty) = var.ty {
             self.var_types.insert(id, ty);
             return ty;
@@ -140,7 +137,7 @@ impl<'a> BasicTypeInfer<'a> {
             .var_parent
             .parent(id)
             .expect(&format!("No parent for var {:?}", id.name_of(self.ir)));
-        let op = self.ir.get(parent).unwrap();
+        let op = self.ir.get(parent);
         let ty = match &op.kind {
             ir::OPKind::Add { .. } => {
                 // TODO: should check types
@@ -148,10 +145,10 @@ impl<'a> BasicTypeInfer<'a> {
             }
             ir::OPKind::GetAttr { obj, attr, .. } => {
                 let ty = self.type_of(*obj);
-                let mut struct_ty = self.ir.get_unique(ty).unwrap();
+                let mut struct_ty = self.ir.get(ty);
                 if let ir::TypeKind::Decl { decl } = &struct_ty.kind {
-                    let remapped = self.ir.get(*decl).unwrap().decl;
-                    struct_ty = self.ir.get_unique(remapped).unwrap();
+                    let remapped = self.ir.get(*decl).decl;
+                    struct_ty = self.ir.get(remapped);
                 }
                 if let ir::TypeKind::Struct { fields } = &struct_ty.kind {
                     let idx = fields.iter().position(|(name, _)| *name == *attr).unwrap();
@@ -163,7 +160,7 @@ impl<'a> BasicTypeInfer<'a> {
                 }
             }
             ir::OPKind::Call { func, .. } => {
-                let decl = self.ir.get(*func).unwrap();
+                let decl = self.ir.get(*func);
                 decl.decl.ret_ty
             }
             ir::OPKind::Struct { fields } => {
@@ -191,7 +188,7 @@ fn rewrite_var_types(ir: &mut ir::IR) {
     let var_parent = VarParent::new(ir);
     let mut infer = BasicTypeInfer::new(ir, &var_parent);
 
-    for (id, _) in ir.iter_ids::<ir::VarID>() {
+    for id in ir.iter::<ir::VarID>() {
         infer.type_of(id);
     }
 
@@ -200,16 +197,16 @@ fn rewrite_var_types(ir: &mut ir::IR) {
         get_attr_idx,
         ..
     } = infer;
-    let var_ids = ir.iter_ids::<ir::VarID>().map(|x| x.0).collect::<Vec<_>>();
+    let var_ids = ir.iter::<ir::VarID>();
     for id in var_ids {
         let ty = var_types[&id];
-        let var = ir.get_mut(id).unwrap();
+        let var = ir.get_mut(id);
         var.ty = Some(ty);
     }
 
-    let op_ids = ir.iter_ids::<ir::OPID>().map(|x| x.0).collect::<Vec<_>>();
+    let op_ids = ir.iter::<ir::OPID>();
     for id in op_ids {
-        let op = ir.get_mut(id).unwrap();
+        let op = ir.get_mut(id);
         match &mut op.kind {
             ir::OPKind::GetAttr { idx, .. } => {
                 *idx = Some(get_attr_idx[&id]);

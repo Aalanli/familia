@@ -92,12 +92,14 @@ pub enum Tok {
     I32,
     Ident(Ident),
     Int(i32),
+    String(String),
 }
 
 #[derive(Debug)]
 pub enum LexError {
     UnrecognizedToken(String),
     ParseIntError(String),
+    ParseStringError(String),
 }
 
 type Lex = Result<(Loc, Tok, Loc), LexError>;
@@ -257,7 +259,47 @@ impl<T: Iterator<Item = char>> Lexer<T> {
             }
             self.fill_buf_by(1);
             let lpos = self.get_loc();
-            if self.match_and_eat("{") {
+            if self.match_and_eat("\"") {
+                let mut s = String::new();
+                loop {
+                    self.fill_buf(|c| c != '"' && c != '\\');
+
+                    for c in self.buf.iter() {
+                        s.push(*c);
+                    }
+                    self.clear_buf(|_| true);
+                    if let Some('"') = self.peek_char() {
+                        self.fill_buf_by(1);
+                        self.clear_buf_by(1);
+                        break;
+                    }
+                    if let Some('\\') = self.peek_char() {
+                        self.fill_buf_by(1);
+                        self.clear_buf_by(1);
+                        if let Some('"') = self.peek_char() {
+                            self.fill_buf_by(1);
+                            continue;
+                        } 
+                        if let Some('\\') = self.peek_char() {
+                            self.fill_buf_by(1);
+                            continue;
+                        } 
+                        if let Some('n') = self.peek_char() {
+                            self.fill_buf_by(1);
+                            self.clear_buf_by(1);
+                            s.push('\n');
+                            continue;
+                        }
+
+                        return Some(Err(LexError::ParseStringError(format!("Invalid escape sequence"))));
+                    }
+
+                    if self.peek_char().is_none() {
+                        return Some(Err(LexError::ParseStringError("Unterminated string".to_string())));
+                    }
+                }
+                return Some(Ok((lpos, Tok::String(s), self.get_loc())));
+            } else if self.match_and_eat("{") {
                 let rpos = self.get_loc();
                 return Some(Ok((lpos, Tok::LBrace, rpos)));
             } else if self.match_and_eat("}") {
@@ -431,5 +473,39 @@ mod test_lex {
             panic!();
         }
         assert!(lexer5.next().unwrap().unwrap().1 == Tok::ColonAcc);
+    }
+
+    #[test]
+    fn test_lex_string() {
+        let input = "\"hello world\"";
+        let mut lexer = Lexer::new(input.chars());
+        let (l, tok, r) = lexer.next().unwrap().unwrap();
+        assert!(matches!(tok, Tok::String(s) if s == "hello world"));
+
+        let input = "\"hello \\\"world\\\" \n \"";
+        let mut lexer = Lexer::new(input.chars());
+        let (l, tok, r) = lexer.next().unwrap().unwrap();
+        assert!(matches!(tok, Tok::String(s) if &s == "hello \"world\" \n "));
+
+        let input = "\"test";
+        let mut lexer = Lexer::new(input.chars());
+        let res = lexer.next().unwrap();
+        assert!(matches!(res, Err(LexError::ParseStringError(_))));
+
+        let input = "\"test\\\\\"";
+        let mut lexer = Lexer::new(input.chars());
+        let (l, tok, r) = lexer.next().unwrap().unwrap();
+        assert!(matches!(tok, Tok::String(s) if &s == "test\\"));
+
+        let input = "\"test\\n\"";
+        let mut lexer = Lexer::new(input.chars());
+        let (l, tok, r) = lexer.next().unwrap().unwrap();
+        assert!(matches!(tok, Tok::String(s) if &s == "test\n"));
+
+        let input = "\"test\\\\\\ \"";
+        let mut lexer = Lexer::new(input.chars());
+        let res = lexer.next().unwrap();
+        assert!(matches!(res, Err(LexError::ParseStringError(_))));
+
     }
 }

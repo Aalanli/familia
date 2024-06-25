@@ -57,6 +57,10 @@ impl<T: ?Sized> Registry<T> {
             .collect::<Vec<_>>()
             .into_iter()
     }
+
+    pub fn for_each(&self, mut f: impl FnMut(NodeID)) {
+        self.data.borrow().keys().for_each(|id| f(NodeID { id: *id }));
+    }
 }
 
 impl<T> Registry<T> {
@@ -164,6 +168,10 @@ impl GenericUniqueRegistry {
             .collect::<Vec<_>>()
             .into_iter()
     }
+
+    pub fn for_each(&self, mut f: impl FnMut(NodeID)) {
+        self.data.borrow().keys().for_each(|id| f(NodeID { id: *id }));
+    }
 }
 #[cfg(test)]
 mod test_registry {
@@ -192,7 +200,12 @@ mod test_registry {
         let id4 = reg.insert("test");
         assert_eq!(id3, id4);
 
-        let t = *reg.get(id3).unwrap().as_any().downcast_ref::<&str>().unwrap();
+        let t = *reg
+            .get(id3)
+            .unwrap()
+            .as_any()
+            .downcast_ref::<&str>()
+            .unwrap();
         assert_eq!(t, "test");
     }
 

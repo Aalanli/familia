@@ -40,6 +40,18 @@ define dso_local i32 @bar(%struct.R* noundef byval(%struct.R) align 8 %0) #0 {
 }
 
 ; Function Attrs: noinline nounwind optnone uwtable
+define dso_local i32 @baz(%struct.R* noundef %0) #0 {
+  %2 = alloca %struct.R*, align 8
+  store %struct.R* %0, %struct.R** %2, align 8
+  %3 = load %struct.R*, %struct.R** %2, align 8
+  %4 = getelementptr inbounds %struct.R, %struct.R* %3, i32 0, i32 0
+  %5 = getelementptr inbounds %struct.T, %struct.T* %4, i32 0, i32 0
+  %6 = load i32, i32* %5, align 8
+  %7 = add nsw i32 %6, 1
+  ret i32 %7
+}
+
+; Function Attrs: noinline nounwind optnone uwtable
 define dso_local i32 @main() #0 {
   %1 = alloca %struct.T, align 4
   %2 = alloca %struct.T, align 4
