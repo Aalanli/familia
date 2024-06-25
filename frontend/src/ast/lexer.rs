@@ -507,5 +507,9 @@ mod test_lex {
         let res = lexer.next().unwrap();
         assert!(matches!(res, Err(LexError::ParseStringError(_))));
 
+        let input = "\"🥲\"";
+        let mut lexer = Lexer::new(input.chars());
+        let (l, tok, r) = lexer.next().unwrap().unwrap();
+        assert!(matches!(tok, Tok::String(s) if &s == "🥲"));
     }
 }
