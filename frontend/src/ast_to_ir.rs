@@ -1,6 +1,8 @@
-use anyhow::Result;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::hash::Hash;
+
+use lazy_static::lazy_static;
 
 use crate::prelude::*;
 use crate::ast as ast;
@@ -49,8 +51,111 @@ impl<'a, K, V> PointerHashMap<'a, K, V> {
     }
 }
 
+
+lazy_static!(
+    static ref BUILTIN_TYPES: HashMap<&'static str, ir::TypeKind> = {
+        let mut m = HashMap::new();
+        m.insert("i32", ir::TypeKind::I32);
+        m.insert("String", ir::TypeKind::String);
+        m
+    };
+);
+
+struct BuiltinFnProto {
+    name: &'static str,
+    args: Vec<ir::TypeKind>,
+    ret_ty: ir::TypeKind,
+}
+
+lazy_static!(
+    static ref BUILTIN_FNS: HashMap<&'static str, BuiltinFnProto> = {
+        let mut m = HashMap::new();
+        m.insert("print", BuiltinFnProto { 
+            name: "print", 
+            args: vec![ir::TypeKind::String], 
+            ret_ty: ir::TypeKind::Void
+        });
+        m.insert("to_str", BuiltinFnProto { 
+            name: "to_str", 
+            args: vec![ir::TypeKind::I32], 
+            ret_ty: ir::TypeKind::String
+        });
+        m.insert("str_concat", BuiltinFnProto { 
+            name: "str_concat", 
+            args: vec![ir::TypeKind::String, ir::TypeKind::String], 
+            ret_ty: ir::TypeKind::String
+        });
+        m
+    };
+
+);
+
+fn get_builtin_type(path: &ast::Path) -> PResult<ir::TypeKind> {
+    if path.len() == 1 {
+        let name = path.path[0].name.view();
+        if let Some(ty) = BUILTIN_TYPES.get(name) {
+            return Ok(ty.clone());
+        }
+    }
+
+    Err(ProgramError { error_message: "unbound type name", span: Some(path.span), ..Default::default() })
+}
+
+fn is_builtin_fn(path: &ast::Path) -> bool {
+    if path.len() == 1 {
+        let name = path.path[0].name.view();
+        if BUILTIN_FNS.contains_key(name) {
+            return true;
+        }
+    }
+    false
+}
+
+fn check_duplicate_name<'a>(src: &'a ModSource, ast: &Decl) -> PhaseResult<'a, ()> {
+    fn check_duplicate_name_helper<'a>(src: &'a ModSource, ast: &Decl) {
+        let mut names = HashSet::new();
+        match &ast.kind {
+            ast::DeclKind::Module { name, file, top, decls } => {
+                for subdecl in decls {
+                    let name = subdecl.name();
+                    if names.contains(name) {
+                        src.add_err(ProgramError {
+                            error_type: ErrorType::Error,
+                            error_message: "duplicate name",
+                            span: Some(subdecl.span),
+                            highlight_message: None,
+                        });
+                    } else {
+                        names.insert(name);
+                    }
+                }
+            }
+            ast::DeclKind::ClassImpl { name, sub_decls } => {
+                for subdecl in sub_decls {
+                    let name = subdecl.name();
+                    if names.contains(name) {
+                        src.add_err(ProgramError {
+                            error_type: ErrorType::Error,
+                            error_message: "duplicate name",
+                            span: Some(subdecl.span),
+                            highlight_message: None,
+                        });
+                    } else {
+                        names.insert(name);
+                    }
+                }
+            }
+            _ => {}
+        }
+
+    }
+    check_duplicate_name_helper(src, ast);
+    src.commit_error(())
+}
+
 // disallow nested classes for now
 fn check_basic<'a>(src: &'a ModSource, ast: &Decl) -> PhaseResult<'a, ()> {
+    check_duplicate_name(src, ast)?;
     if let ast::DeclKind::Module { decls, .. } = &ast.kind {
         for decl in decls.iter() {
             if let ast::DeclKind::ClassImpl { sub_decls, .. } = &decl.kind {
@@ -148,6 +253,10 @@ fn check_path<'a, 's>(src: &'s ModSource, ast: &'a Decl) -> PhaseResult<'s, Path
         if d.is_ok() {
             path_map.insert(path, d.unwrap());
             continue;
+        } else if get_builtin_type(path).is_ok() {
+            continue;
+        } else if is_builtin_fn(path) {
+            continue;
         }
         src.add_err(d.unwrap_err());
     }
@@ -204,30 +313,27 @@ impl<'a> ast::Visitor<'a> for CollectClassImpl<'a> {
     }
 }
 
+pub struct PrimitiveRegistry {
+    pub i32: ir::TypeID,
+    pub string: ir::TypeID,
+    pub void: ir::TypeID,
+    pub print: ir::FuncID,
+    pub to_str: ir::FuncID,
+    pub concat: ir::FuncID,
+
+}
+
 struct ASTToIR<'a> {
     ast: &'a ast::Decl,
     path_map: PathMap<'a>,
+    builtins_fn_map: HashMap<&'static str, ir::FuncID>,
     ty_decl_to_id: PointerHashMap<'a, ast::Decl, ir::TypeDeclID>,
     ty_decl_to_ty_id: PointerHashMap<'a, ast::Decl, ir::TypeID>,
     fn_impl_to_id: PointerHashMap<'a, ast::Decl, ir::FuncID>,
     class_impl_to_id: PointerHashMap<'a, ast::Decl, ir::ClassID>,
-    var_remap: HashMap<ir::VarID, ir::VarID>,
 }
 
 impl<'a> ASTToIR<'a> {
-    fn get_builtin_type(&self, path: &ast::Path) -> PResult<ir::TypeKind> {
-        if path.len() == 1 {
-            let name = path.path[0].name.view();
-            match name {
-                "i32" => return Ok(ir::TypeKind::I32),
-                "String" => return Ok(ir::TypeKind::String),
-                _ => {}
-            }
-        }
-
-        Err(ProgramError { error_message: "unbound type name", span: Some(path.span), ..Default::default() })
-    }
-
     fn recursively_construct_types(&self, ty: &ast::Type, ir: &mut ir::IR) -> PResult<ir::TypeKind> {
         let ty_kind;
         match &ty.kind {
@@ -257,11 +363,44 @@ impl<'a> ASTToIR<'a> {
                     let id = self.ty_decl_to_ty_id.get(*decl).unwrap();
                     ty_kind = ir::TypeKind::Rec { id: *id };
                 } else {
-                    ty_kind = self.get_builtin_type(path)?;
+                    ty_kind = get_builtin_type(path)?;
                 }
             }
         }
         Ok(ty_kind)
+    }
+
+    fn insert_builtin_fns(&mut self, ir: &mut ir::IR) {
+        let fdecl = ir::FuncDecl { 
+            name: ir::SymbolID::insert(ir, "print"), 
+            args: vec![(ir::SymbolID::insert(ir, "a"), ir::TypeID::insert_type(ir, ir::TypeKind::String))], 
+            ret_ty: ir::TypeID::insert_type(ir, ir::TypeKind::Void) 
+        };
+        let fimpl = ir::FuncImpl {
+            decl: fdecl,
+            vars: vec![],
+            body: vec![],
+            builtin: true,
+        };
+
+        let fid = ir.insert(fimpl);
+        self.builtins_fn_map.insert("print", fid);
+
+        let fdecl = ir::FuncDecl { 
+            name: ir::SymbolID::insert(ir, "to_str"), 
+            args: vec![(ir::SymbolID::insert(ir, "a"), ir::TypeID::insert_type(ir, ir::TypeKind::I32))], 
+            ret_ty: ir::TypeID::insert_type(ir, ir::TypeKind::String) 
+        };
+        let fimpl = ir::FuncImpl {
+            decl: fdecl,
+            vars: vec![],
+            body: vec![],
+            builtin: true,
+        };
+
+        let fid = ir.insert(fimpl);
+        self.builtins_fn_map.insert("to_str", fid);
+        
     }
 
     fn insert_type_decls<'s>(&mut self, ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<'s, ()> {
@@ -322,6 +461,7 @@ impl<'a> ASTToIR<'a> {
         var_map: &mut HashMap<ir::SymbolID, ir::VarID>,
         ops: &mut Vec<ir::OPID>,
         expr: &ast::Expr,
+        parent_name: Option<ir::SymbolID>,
         ir: &mut ir::IR,
     ) -> ir::VarID {
         match &expr.kind {
@@ -332,11 +472,11 @@ impl<'a> ASTToIR<'a> {
             }
             ast::ExprKind::IntLit(i) => {
                 let id = ir.temporary_id();
-                let var = ir::VarID::new_var(ir, None, None, Some(expr.span));
+                let var = ir::VarID::new_var(ir, parent_name, None, Some(expr.span));
                 ir.insert_with(
                     id,
                     ir::OP {
-                        kind: ir::OPKind::Constant { value: *i },
+                        kind: ir::OPKind::Constant(ir::ConstKind::I32(*i)),
                         span: expr.span,
                         res: Some(var),
                         id,
@@ -345,10 +485,24 @@ impl<'a> ASTToIR<'a> {
                 ops.push(id);
                 return var;
             }
-            ast::ExprKind::StringLit(_) => {todo!()}
+            ast::ExprKind::StringLit(s) => {
+                let id = ir.temporary_id();
+                let var = ir::VarID::new_var(ir, parent_name, None, Some(expr.span));
+                ir.insert_with(
+                    id,
+                    ir::OP {
+                        kind: ir::OPKind::Constant(ir::ConstKind::String(ir::SymbolID::insert(ir, s))),
+                        span: expr.span,
+                        res: Some(var),
+                        id,
+                    },
+                );
+                ops.push(id);
+                return var;
+            }
             ast::ExprKind::GetAttr { exp, sym } => {
-                let expr_id = self.insert_expr(var_map, ops, exp, ir);
-                let var = ir::VarID::new_var(ir, None, None, Some(expr.span));
+                let expr_id = self.insert_expr(var_map, ops, exp, parent_name, ir);
+                let var = ir::VarID::new_var(ir, parent_name, None, Some(expr.span));
                 let id = ir.temporary_id();
                 ir.insert_with(
                     id,
@@ -369,13 +523,17 @@ impl<'a> ASTToIR<'a> {
             ast::ExprKind::Call { path, args } => {
                 let var_ids = args
                     .iter()
-                    .map(|expr| self.insert_expr(var_map, ops, expr, ir))
+                    .map(|expr| self.insert_expr(var_map, ops, expr, parent_name, ir))
                     .collect();
                 let func_id = *self
                     .fn_impl_to_id
-                    .get(*self.path_map.get(path).unwrap())
-                    .unwrap();
-                let var = ir::VarID::new_var(ir, None, None, Some(expr.span));
+                    .get(*self.path_map.get(path).unwrap()).unwrap_or_else(|| {
+                        assert!(is_builtin_fn(path));
+                        self.builtins_fn_map.get(path.path[0].name.view()).unwrap()
+                    });
+
+
+                let var = ir::VarID::new_var(ir, parent_name, None, Some(expr.span));
                 let id = ir.temporary_id();
                 ir.insert_with(
                     id,
@@ -393,9 +551,9 @@ impl<'a> ASTToIR<'a> {
                 return var;
             }
             ast::ExprKind::Add { lhs, rhs } => {
-                let lhs_id = self.insert_expr(var_map, ops, lhs, ir);
-                let rhs_id = self.insert_expr(var_map, ops, rhs, ir);
-                let var = ir::VarID::new_var(ir, None, None, Some(expr.span));
+                let lhs_id = self.insert_expr(var_map, ops, lhs, parent_name, ir);
+                let rhs_id = self.insert_expr(var_map, ops, rhs, parent_name, ir);
+                let var = ir::VarID::new_var(ir, parent_name, None, Some(expr.span));
                 let id = ir.temporary_id();
                 ir.insert_with(
                     id,
@@ -415,10 +573,10 @@ impl<'a> ASTToIR<'a> {
             ast::ExprKind::Struct { args } => {
                 let mut field_ids = Vec::new();
                 for (sym, expr) in args.iter() {
-                    let var_id = self.insert_expr(var_map, ops, expr, ir);
+                    let var_id = self.insert_expr(var_map, ops, expr, parent_name, ir);
                     field_ids.push((ir::SymbolID::insert(ir, &sym.name.view()), var_id));
                 }
-                let var = ir::VarID::new_var(ir, None, None, Some(expr.span));
+                let var = ir::VarID::new_var(ir, parent_name, None, Some(expr.span));
                 let id = ir.temporary_id();
                 ir.insert_with(
                     id,
@@ -445,16 +603,16 @@ impl<'a> ASTToIR<'a> {
         let op_kind;
         match &stmt.kind {
             ast::StmtKind::ReturnStmt { expr } => {
-                let var = self.insert_expr(var_map, ops, expr, ir);
+                let var = self.insert_expr(var_map, ops, expr, None, ir);
                 op_kind = ir::OPKind::Return { value: var };
             }
             ast::StmtKind::ExprStmt { expr } => {
-                let _var = self.insert_expr(var_map, ops, expr, ir);
+                let _var = self.insert_expr(var_map, ops, expr, None, ir);
                 return;
             }
             ast::StmtKind::LetStmt { var, expr } => {
                 let var_sym = ir::SymbolID::insert(ir, var.name.get_str());
-                let expr_id = self.insert_expr(var_map, ops, expr, ir);
+                let expr_id = self.insert_expr(var_map, ops, expr, Some(var_sym), ir);
                 var_map.insert(var_sym, expr_id);
                 // op_kind = ir::OPKind::Assign {
                 //     lhs: var_id,
@@ -546,6 +704,7 @@ impl<'a> ASTToIR<'a> {
                     decl: func_decl,
                     vars: func_vars,
                     body: ops,
+                    builtin: false,
                 },
             );
         }
@@ -588,6 +747,7 @@ impl<'a> ASTToIR<'a> {
     }
 
     pub fn lower_ir<'s>(&mut self, ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<'s, ()> {
+        self.insert_builtin_fns(ir);
         self.insert_type_decls(ir, src)?;
         self.insert_fn_impl(ir, src)?;
         self.insert_class_impls(ir);
@@ -602,17 +762,18 @@ pub fn ast_to_ir<'s, 'a>(src: &'s ModSource, ast: &'a Decl) -> PhaseResult<'s, i
     let mut ast_to_ir = ASTToIR {
         path_map,
         ast,
+        builtins_fn_map: HashMap::new(),
         ty_decl_to_id: PointerHashMap::new(),
         ty_decl_to_ty_id: PointerHashMap::new(),
         fn_impl_to_id: PointerHashMap::new(),
         class_impl_to_id: PointerHashMap::new(),
-        var_remap: HashMap::new(),
     };
     let mut ir = ir::IR::new();
     ast_to_ir.lower_ir(&mut ir, src)?;
     Ok(ir)
 }
-/*
+
+
 #[cfg(test)]
 mod ast_to_ir_test {
     use super::*;
@@ -620,8 +781,7 @@ mod ast_to_ir_test {
 
     #[test]
     fn test_check_path() {
-        let ast = parse(
-            "\
+        let src = "\
             class A {
                 fn foo(a: i32): i32 { return (a + 1); }
                 class B {
@@ -632,11 +792,10 @@ mod ast_to_ir_test {
                 A::foo(1);
                 A::B::bar(2);
             }
-            "
-        )
-        .unwrap();
+            ".into();
+        let ast = parse(&src).unwrap();
 
-        let _t = check_path(&ast).unwrap();
+        let _t = check_path(&src, &ast).unwrap();
         // for (k, v) in _t.map.iter() {
         //     println!("{} -> {}", k.key, v.name());
         // }
@@ -644,23 +803,23 @@ mod ast_to_ir_test {
 
     #[test]
     fn test_ast_to_ir() {
-        let ast = parse(
-            "\
-            type T = {a: i32, b: i32}
-            type R = {a: T, b: T}
-            class A {
-                fn foo(a: T): i32 { return (a.a + 1); }
-            }
-            fn main() {
-                A::foo({a: 1, b: 2});
-            }
-            "
+        let src =
+        "\
+        type T = {a: i32, b: i32}
+        type R = {a: T, b: T}
+        class A {
+            fn foo(a: T): i32 { return (a.a + 1); }
+        }
+        fn main() {
+            A::foo({a: 1, b: 2});
+        }
+        ".into();
+        let ast = parse(&src
         )
         .unwrap();
         // println!("{:?}", ast);
 
-        let _ir = ast_to_ir(&ast).unwrap();
-        // println!("{}", ir::print_basic(&_ir));
+        let _ir = ast_to_ir(&src, &ast).unwrap();
+        println!("{}", ir::print_basic(&_ir));
     }
 }
-*/

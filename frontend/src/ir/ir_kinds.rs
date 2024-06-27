@@ -1,11 +1,13 @@
-use std::any::Any;
+use std::any::{self, Any};
 use std::hash::Hash;
+use std::collections::HashMap;
 
 pub use super::registry::NodeID;
 use super::registry::{GenericUniqueRegistry, Registry};
 use crate::ast::Span;
 
 pub struct IR {
+    globals: HashMap<any::TypeId, Box<dyn Any>>,
     registry: Registry<dyn Any>,
     unique_registry: GenericUniqueRegistry,
 }
@@ -13,6 +15,7 @@ pub struct IR {
 impl IR {
     pub fn new() -> Self {
         IR {
+            globals: HashMap::new(),
             registry: Registry::new(),
             unique_registry: GenericUniqueRegistry::new(),
         }
@@ -24,6 +27,18 @@ impl IR {
 
     fn get_any_mut(&mut self, id: NodeID) -> Option<&mut dyn Any> {
         self.registry.get_mut(id)
+    }
+
+    pub fn insert_global(&mut self, value: impl Any) {
+        self.globals.insert(value.type_id(), Box::new(value));
+    }
+
+    pub fn get_global<T: 'static>(&self) -> Option<&T> {
+        self.globals.get(&std::any::TypeId::of::<T>()).and_then(|any| any.downcast_ref::<T>())
+    }
+
+    pub fn get_global_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        self.globals.get_mut(&std::any::TypeId::of::<T>()).and_then(|any| any.downcast_mut::<T>())
     }
 
     pub fn get<I: ID>(&self, id: I) -> &I::Node {
@@ -55,7 +70,11 @@ impl IR {
     }
 
     pub fn insert_with<I: ID>(&self, id: I, node: I::Node) {
-        self.registry.insert_with_boxed(id.id(), Box::new(node));
+        if I::IS_UNIQUE {
+            self.unique_registry.insert_with(id.id(), node).unwrap();
+        } else {
+            self.registry.insert_with_boxed(id.id(), Box::new(node));
+        }
     }
 
     pub fn temporary_id<I: ID>(&self) -> I {
@@ -256,6 +275,7 @@ pub struct FuncImpl {
     pub decl: FuncDecl,
     pub vars: Vec<VarID>,
     pub body: Vec<OPID>,
+    pub builtin: bool
 }
 
 impl_id!(OPID, OP, false);
@@ -290,13 +310,17 @@ pub enum OPKind {
     Return {
         value: VarID,
     },
-    Constant {
-        value: i32,
-    },
+    Constant(ConstKind),
     Assign {
         lhs: VarID,
         rhs: VarID,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ConstKind {
+    I32(i32),
+    String(SymbolID),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

@@ -219,22 +219,22 @@ pub fn transform_ir(ir: &mut ir::IR) {
     rewrite_var_types(ir);
 }
 
-/* 
+
 #[cfg(test)]
 mod test_type_infer {
     use super::*;
-    use crate::parse;
 
     fn generate_ir_from_str(s: &str) -> ir::IR {
-        let ast = crate::parse(s.into(), None).unwrap();
-        let mut ir = crate::ast_to_ir(&ast).unwrap();
+        let src = s.into();
+        let ast = crate::parse(&src).unwrap();
+        let mut ir = crate::ast_to_ir(&src, &ast).unwrap();
         rewrite_var_types(&mut ir);
         ir
     }
 
     #[test]
     fn test1() {
-        let ast = parse(
+        generate_ir_from_str(
             "\
             type T = {a: i32, b: i32}
             fn foo(a: T, b: i32): i32 {
@@ -243,15 +243,7 @@ mod test_type_infer {
             fn main() {
                 foo({a: 1, b: 2}, 3);
             }"
-            .into(),
-            None,
-        )
-        .unwrap();
-
-        let mut _ir = crate::ast_to_ir(&ast).unwrap();
-        // println!("{}", ir::print_basic(&_ir));
-        rewrite_var_types(&mut _ir);
-        // println!("{}", ir::print_basic(&_ir));
+        );
     }
 
     #[test]
@@ -293,4 +285,4 @@ mod test_type_infer {
         println!("{}", ir::print_basic(&_ir));
     }
 }
-*/
+

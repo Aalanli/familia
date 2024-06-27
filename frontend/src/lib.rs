@@ -16,9 +16,10 @@ pub use transforms::transform_ir;
 
 pub type PhaseResult<'a, T> = Result<T, &'a ModSource>;
 
+#[derive(Debug)]
 pub struct ModSource {
+    pub text: String,
     file: Option<String>,
-    lines: Vec<String>,
     errors: RefCell<Vec<error::ProgramError>>,
 }
 
@@ -26,7 +27,7 @@ impl ModSource {
     pub fn new(file: Option<String>, text: String) -> Self {
         ModSource {
             file,
-            lines: text.lines().map(|s| s.to_string()).collect(),
+            text,
             errors: RefCell::new(Vec::new()),
         }
     }
@@ -44,5 +45,9 @@ impl ModSource {
     }
 }
 
-
+impl From<&str> for ModSource {
+    fn from(text: &str) -> Self {
+        ModSource::new(None, text.to_string())
+    }
+}
 
