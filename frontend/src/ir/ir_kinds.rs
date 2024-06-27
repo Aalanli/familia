@@ -37,13 +37,11 @@ impl IR {
     }
 
     pub fn get_mut<I: ID>(&mut self, id: I) -> &mut I::Node {
+        // a hacky way to enforce during compile time that I is not unique
         let _ = I::CHECK;
-        if I::IS_UNIQUE {
-            panic!("Unique ID is not mutable");
-        } else {
-            let any = self.get_any_mut(id.id()).unwrap();
-            any.downcast_mut::<I::Node>().unwrap()
-        }
+        let any = self.get_any_mut(id.id()).unwrap();
+        any.downcast_mut::<I::Node>().unwrap()
+        
     }
 
     pub fn insert<I: ID>(&self, node: I::Node) -> I {
@@ -95,11 +93,6 @@ impl IR {
     }
 }
 
-fn test(ir: &mut IR, t: TypeID) {
-    let a = [1, 2, 3];
-    a[4];
-    ir.get_mut(t);
-}
 
 pub trait ID: Copy + Eq + Ord + Hash {
     type Node: Hash + Eq + 'static;
@@ -113,7 +106,7 @@ trait CheckNotUnique: ID {
 }
 
 impl<T: ID> CheckNotUnique for T {
-    const CHECK: () = [()][(!T::IS_UNIQUE) as usize];
+    const CHECK: () = [()][T::IS_UNIQUE as usize];
 }
 
 macro_rules! impl_id {
