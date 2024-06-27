@@ -83,13 +83,13 @@ pub enum Tok {
     Dot,
     LParen,
     RParen,
+    DoubleParen, // ()
     LBrace,
     RBrace,
     Colon,
     SemiColon,
     ColonAcc, // ::
     Comma,
-    I32,
     Ident(Ident),
     Int(i32),
     String(String),
@@ -306,6 +306,10 @@ impl<T: Iterator<Item = char>> Lexer<T> {
                 let rpos = self.get_loc();
                 return Some(Ok((lpos, Tok::RBrace, rpos)));
             } else if self.match_and_eat("(") {
+                if self.match_and_eat(")") {
+                    let rpos = self.get_loc();
+                    return Some(Ok((lpos, Tok::DoubleParen, rpos)));
+                }
                 let rpos = self.get_loc();
                 return Some(Ok((lpos, Tok::LParen, rpos)));
             } else if self.match_and_eat(")") {
@@ -344,10 +348,7 @@ impl<T: Iterator<Item = char>> Lexer<T> {
 
             self.fill_ident();
             // println!("{:?}", self.buf.iter().collect::<String>());
-            if self.match_and_eat("i32") {
-                let rpos = self.get_loc();
-                return Some(Ok((lpos, Tok::I32, rpos)));
-            } else if self.match_and_eat("class") {
+            if self.match_and_eat("class") {
                 let rpos = self.get_loc();
                 return Some(Ok((lpos, Tok::Class, rpos)));
             } else if self.match_and_eat("type") {

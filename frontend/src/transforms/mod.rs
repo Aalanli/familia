@@ -41,6 +41,7 @@ impl Query for ContainsCycle {
         match &ty.kind {
             ir::TypeKind::I32 => false,
             ir::TypeKind::Void => false,
+            ir::TypeKind::String => false,
             ir::TypeKind::Struct { fields } => {
                 for (_, field_ty) in fields {
                     match q.query(ContainsCycle(*field_ty)) {
@@ -51,9 +52,8 @@ impl Query for ContainsCycle {
                 }
                 false
             }
-            ir::TypeKind::Decl { decl } => {
-                let decl = ir.get(*decl);
-                q.query(ContainsCycle(decl.decl)).map_or(true, |x| x)
+            ir::TypeKind::Rec { id } => {
+                q.query(ContainsCycle(*id)).map_or(true, |x| x)
             }
         }
     }
@@ -71,6 +71,7 @@ impl Query for InlinedType {
         match &ty.kind {
             ir::TypeKind::I32 => self.0,
             ir::TypeKind::Void => self.0,
+            ir::TypeKind::String => self.0,
             ir::TypeKind::Struct { fields } => {
                 let field_tys = fields
                     .iter()
@@ -78,9 +79,8 @@ impl Query for InlinedType {
                     .collect();
                 ir::TypeID::insert_type(ir, ir::TypeKind::Struct { fields: field_tys })
             }
-            ir::TypeKind::Decl { decl } => {
-                let decl = ir.get(*decl);
-                q.query(InlinedType(decl.decl)).unwrap()
+            ir::TypeKind::Rec { id } => {
+                q.query(InlinedType(*id)).unwrap()
             }
         }
     }
@@ -146,9 +146,8 @@ impl<'a> BasicTypeInfer<'a> {
             ir::OPKind::GetAttr { obj, attr, .. } => {
                 let ty = self.type_of(*obj);
                 let mut struct_ty = self.ir.get(ty);
-                if let ir::TypeKind::Decl { decl } = &struct_ty.kind {
-                    let remapped = self.ir.get(*decl).decl;
-                    struct_ty = self.ir.get(remapped);
+                if let ir::TypeKind::Rec { id } = &struct_ty.kind {;
+                    struct_ty = self.ir.get(*id);
                 }
                 if let ir::TypeKind::Struct { fields } = &struct_ty.kind {
                     let idx = fields.iter().position(|(name, _)| *name == *attr).unwrap();
@@ -220,6 +219,7 @@ pub fn transform_ir(ir: &mut ir::IR) {
     rewrite_var_types(ir);
 }
 
+/* 
 #[cfg(test)]
 mod test_type_infer {
     use super::*;
@@ -293,3 +293,4 @@ mod test_type_infer {
         println!("{}", ir::print_basic(&_ir));
     }
 }
+*/

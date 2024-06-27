@@ -37,6 +37,7 @@ impl IR {
     }
 
     pub fn get_mut<I: ID>(&mut self, id: I) -> &mut I::Node {
+        let _ = I::CHECK;
         if I::IS_UNIQUE {
             panic!("Unique ID is not mutable");
         } else {
@@ -94,12 +95,25 @@ impl IR {
     }
 }
 
+fn test(ir: &mut IR, t: TypeID) {
+    let a = [1, 2, 3];
+    a[4];
+    ir.get_mut(t);
+}
 
 pub trait ID: Copy + Eq + Ord + Hash {
     type Node: Hash + Eq + 'static;
     const IS_UNIQUE: bool;
     fn id(&self) -> NodeID;
     fn new(node: NodeID) -> Self;
+}
+
+trait CheckNotUnique: ID {
+    const CHECK: ();
+}
+
+impl<T: ID> CheckNotUnique for T {
+    const CHECK: () = [()][(!T::IS_UNIQUE) as usize];
 }
 
 macro_rules! impl_id {
@@ -133,7 +147,7 @@ impl SymbolID {
         &self.get_symbol(ir).name
     }
 
-    pub fn insert_symbol(ir: &IR, name: &str) -> SymbolID {
+    pub fn insert(ir: &IR, name: &str) -> SymbolID {
         ir.insert(Symbol {
             name: name.to_string(),
         })
@@ -171,7 +185,7 @@ impl VarID {
         ty: Option<TypeID>,
         span: Option<Span>,
     ) -> VarID {
-        let name = name.unwrap_or_else(|| SymbolID::insert_symbol(ir, ""));
+        let name = name.unwrap_or_else(|| SymbolID::insert(ir, ""));
         let id = ir.temporary_id();
         ir.insert(Var { id, name, ty, span })
     }
@@ -224,8 +238,9 @@ pub struct TypeDecl {
 pub enum TypeKind {
     I32,
     Void,
+    String,
     Struct { fields: Vec<(SymbolID, TypeID)> },
-    Decl { decl: TypeDeclID },
+    Rec { id: TypeID },
 }
 
 impl Default for TypeKind {

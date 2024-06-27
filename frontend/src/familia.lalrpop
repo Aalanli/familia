@@ -79,6 +79,7 @@ pub Expr : Expr = {
 
 ExprKind: ExprKind = {
     <n:Int> => ExprKind::IntLit(n),
+    <s:String> => ExprKind::StringLit(s),
     <v:Var> => ExprKind::Var(v),
     <e:Expr> "." <a:Ident> => ExprKind::GetAttr { exp: P(e), sym: a },
     "(" <l:Expr> "+" <r:Expr> ")" => ExprKind::Add { lhs:P(l), rhs:P(r) },
@@ -93,7 +94,7 @@ pub Type : Type = {
 }
 
 TypeKind: TypeKind = {
-    "i32" => TypeKind::I32,
+    "()" => TypeKind::Void,
     "{" <fields:Comma<TypeVar>> "}" => {
         TypeKind::Struct { fields }
     },
@@ -132,7 +133,7 @@ extern {
     type Error = LexError;
 
     enum Tok {
-        "i32" => Tok::I32,
+        "()" => Tok::DoubleParen,
         "class" => Tok::Class,
         "type" => Tok::Type,
         "fn" => Tok::Fn,

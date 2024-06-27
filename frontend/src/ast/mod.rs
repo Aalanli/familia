@@ -24,6 +24,7 @@ pub struct Type {
 pub enum TypeKind {
     Void,
     I32,
+    String,
     Struct { fields: Vec<Var> },
     Symbol(Path),
 }
@@ -99,6 +100,7 @@ pub struct Expr {
 pub enum ExprKind {
     Var(Var),
     IntLit(i32),
+    StringLit(String),
     GetAttr { exp: P<Expr>, sym: Ident },
     Add { lhs: P<Expr>, rhs: P<Expr> },
     Call { path: Path, args: Vec<Expr> },
@@ -190,6 +192,7 @@ pub fn default_visit_type<'a>(ty: &'a Type, visitor: &mut impl Visitor<'a>) {
     match &ty.kind {
         TypeKind::Void => {}
         TypeKind::I32 => {}
+        TypeKind::String => {}
         TypeKind::Struct { fields } => {
             for field in fields {
                 visitor.visit_var(field);
@@ -213,6 +216,7 @@ pub fn default_visit_expr<'a>(expr: &'a Expr, visitor: &mut impl Visitor<'a>) {
             visitor.visit_var(var);
         }
         ExprKind::IntLit(_) => {}
+        ExprKind::StringLit(_) => {}
         ExprKind::GetAttr { exp, .. } => {
             visitor.visit_expr(exp);
         }

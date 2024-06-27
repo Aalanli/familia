@@ -71,9 +71,9 @@ fn generate_llvm_type<'ctx, 'ir>(
             );
             struct_ty.into()
         }
-        ir::TypeKind::Decl { decl } => code
+        ir::TypeKind::Rec { id: decl } => code
             .context
-            .get_struct_type(&ir.namer.name_type(*decl))
+            .get_struct_type(&ir.namer.name_type_decl(*decl))
             .unwrap()
             .into(),
         ir::TypeKind::I32 => code.context.i32_type().into(),
@@ -87,14 +87,14 @@ fn generate_llvm_type<'ctx, 'ir>(
 
 fn codegen_type_decls<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
     for ty_id in ir.ir.iter_stable::<ir::TypeDeclID>() {
-        code.context.opaque_struct_type(&ir.namer.name_type(ty_id));
+        code.context.opaque_struct_type(&ir.namer.name_type_decl(ty_id));
     }
 
     for ty_id in ir.ir.iter_stable::<ir::TypeDeclID>() {
         let decl = ir.ir.get(ty_id);
         let llvm_ty = code
             .context
-            .get_struct_type(&ir.namer.name_type(ty_id))
+            .get_struct_type(&ir.namer.name_type_decl(ty_id))
             .unwrap();
         let ty = ir.ir.get(decl.decl);
         if let ir::TypeKind::Struct { fields } = &ty.kind {

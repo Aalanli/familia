@@ -1,5 +1,4 @@
-use crate::ast::{LexError, Lexer, Loc, Tok};
-use crate::Program;
+use crate::ast::{Decl, LexError, Lexer, Loc, Tok};
 
 use anyhow::Result;
 use lalrpop_util::{lalrpop_mod, ParseError};
@@ -8,14 +7,10 @@ lalrpop_mod!(pub familia);
 
 pub type Error = ParseError<Loc, Tok, LexError>;
 
-pub fn parse(program: String, file: Option<String>) -> Result<Program, Error> {
+pub fn parse(program: &str) -> Result<Decl, Error> {
     let lexer = Lexer::new(program.chars());
     let ast = familia::ASTParser::new().parse(lexer)?;
-    Ok(Program {
-        text: program,
-        file,
-        ast,
-    })
+    Ok(ast)
 }
 
 #[cfg(test)]
@@ -32,8 +27,6 @@ mod parse_test {
                 b: i32
             }
         "
-            .into(),
-            None,
         )
         .unwrap();
         // fn decl
@@ -46,8 +39,6 @@ mod parse_test {
                 return (a.a.a + b.b);
             }
         "
-            .into(),
-            None,
         )
         .unwrap();
         // fn call
@@ -57,12 +48,10 @@ mod parse_test {
                 foo({a: {a: 1, b: 2}, b: {a: 3, b: 4}}, {a: 5, b: 6});
             }
         "
-            .into(),
-            None,
         )
         .unwrap();
 
-        parse("fn t(a:i32):i32".into(), None).unwrap();
+        parse("fn t(a:i32):i32").unwrap();
     }
 
     #[test]
@@ -84,8 +73,6 @@ mod parse_test {
                 }
             }
         "
-            .into(),
-            None,
         )
         .unwrap();
     }
@@ -97,10 +84,7 @@ mod parse_test {
             type T = {
                 a: i32,
                 b: i32
-        "
-            .into(),
-            None,
-        )
+        ")
         .unwrap_err();
 
         parse(
@@ -113,12 +97,22 @@ mod parse_test {
             
             fn foo(a: R, b: T): i32 {
                 return (a.a.a + b.b);
-        "
-            .into(),
-            None,
-        )
+        ")
         .unwrap_err();
 
-        parse("fn t(a::i32):i32".into(), None).unwrap_err();
+        parse("fn t(a::i32):i32").unwrap_err();
+    }
+
+    #[test]
+    fn test_parse_string() {
+        let _t = parse(
+            "\
+            fn main() {
+                let a = \"hello, world\";
+                let b = \"\\\"hello, world\\\"\";
+            }
+            "
+        ).unwrap();
+        // println!("{:?}", _t);
     }
 }

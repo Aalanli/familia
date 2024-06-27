@@ -24,6 +24,7 @@ pub fn print_basic(ir: &IR) -> String {
 pub struct IRNamer {
     fn_prefix_ids: HashMap<FuncID, u32>,
     type_prefix_ids: HashMap<TypeDeclID, u32>,
+    type_decl_tys: HashMap<TypeID, TypeDeclID>,
     class_prefix_ids: HashMap<ClassID, u32>,
     var_prefix: HashMap<VarID, u32>,
     cache: RefCell<HashMap<NodeID, Box<str>>>,
@@ -34,6 +35,10 @@ impl IRNamer {
         IRNamer {
             fn_prefix_ids: Self::compute_id_name(ir, stable),
             type_prefix_ids: Self::compute_id_name(ir, stable),
+            type_decl_tys: ir.iter().map(|id: TypeDeclID| {
+                let ty = ir.get(id);
+                (ty.decl, id)
+            }).collect::<HashMap<_, _>>(),
             class_prefix_ids: Self::compute_id_name(ir, stable),
             var_prefix: Self::compute_id_name(ir, stable),
             cache: RefCell::new(HashMap::new()),
@@ -65,8 +70,12 @@ impl IRNamer {
         }
     }
 
-    pub fn name_type(&self, ty: TypeDeclID) -> &str {
+    pub fn name_type_decl(&self, ty: TypeDeclID) -> &str {
         self.cacher(ty.id(), || format!("t{}", self.type_prefix_ids[&ty]))
+    }
+
+    pub fn try_name_type(&self, ty: TypeID) -> Option<&str> {
+        self.type_decl_tys.get(&ty).map(|decl| self.name_type_decl(*decl))
     }
 
     pub fn name_var(&self, var: VarID) -> &str {
@@ -112,8 +121,8 @@ impl<'ir> BasicPrinter<'ir> {
                     }),
                 );
             }
-            TypeKind::Decl { decl } => {
-                return format!("@{}", self.ir_namer.name_type(*decl));
+            TypeKind::Rec { id: decl } => {
+                return format!("@{}", self.ir_namer.try_name_type(*decl).unwrap_or("rec"));
             }
             TypeKind::I32 => {
                 return "i32".to_string();
@@ -121,13 +130,16 @@ impl<'ir> BasicPrinter<'ir> {
             TypeKind::Void => {
                 return "()".to_string();
             }
+            TypeKind::String => {
+                return "String".to_string();
+            }
         }
     }
 
     pub fn print_type_decl(&self, ty_id: TypeDeclID) -> String {
         let ty = self.ir.get(ty_id);
         let decl = self.print_type(ty.decl);
-        format!("type @{} = {}", self.ir_namer.name_type(ty_id), decl)
+        format!("type @{} = {}", self.ir_namer.name_type_decl(ty_id), decl)
     }
 
     pub fn print_var(&self, var_id: VarID) -> String {
