@@ -121,7 +121,7 @@ fn codegen_fn<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
             .iter()
             .map(|&(_, ty)| code.get_type(ir, ty).into())
             .collect::<Vec<_>>();
-        if func.decl.ret_ty == ir::TypeID::insert_type(&ir.ir, ir::TypeKind::Void) {
+        if func.decl.ret_ty == ir::TypeID::insert(&ir.ir, ir::TypeKind::Void) {
             fn_type = code.context.void_type().fn_type(&arg_types, false);
         } else {
             fn_type = code
@@ -148,7 +148,7 @@ fn codegen_fn<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
         for op in &func.body {
             codegen_op(code, ir, *op);
         }
-        if func.decl.ret_ty == ir::TypeID::insert_type(&ir.ir, ir::TypeKind::Void) {
+        if func.decl.ret_ty == ir::TypeID::insert(&ir.ir, ir::TypeKind::Void) {
             code.builder.build_return(None).unwrap();
         }
     }

@@ -175,7 +175,7 @@ impl<'ir> BasicPrinter<'ir> {
                         return format!("{} = constant({})", self.print_var(op.res.unwrap()), i);
                     }
                     ConstKind::String(s) => {
-                        return format!("{} = constant({})", self.print_var(op.res.unwrap()), s.get_str(self.ir));
+                        return format!("{} = constant(\"{}\")", self.print_var(op.res.unwrap()), s.get_str(self.ir));
                     }
                 }
             }

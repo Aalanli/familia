@@ -215,7 +215,7 @@ pub struct Var {
 impl_id!(TypeID, Type, true);
 
 impl TypeID {
-    pub fn insert_type(ir: &IR, kind: TypeKind) -> TypeID {
+    pub fn insert(ir: &IR, kind: TypeKind) -> TypeID {
         ir.insert(Type { kind })
     }
 }

@@ -313,6 +313,7 @@ impl<'a> ast::Visitor<'a> for CollectClassImpl<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct PrimitiveRegistry {
     pub i32: ir::TypeID,
     pub string: ir::TypeID,
@@ -353,7 +354,7 @@ impl<'a> ASTToIR<'a> {
                     // by the grammar, ty is always Some
                     let fty = field.ty.as_ref().unwrap();
                     let fty_kind = self.recursively_construct_types(fty, ir)?;
-                    field_ids.push((fsym, ir::TypeID::insert_type(ir, fty_kind)));
+                    field_ids.push((fsym, ir::TypeID::insert(ir, fty_kind)));
                 }
                 ty_kind = ir::TypeKind::Struct { fields: field_ids };
             }
@@ -370,37 +371,37 @@ impl<'a> ASTToIR<'a> {
         Ok(ty_kind)
     }
 
-    fn insert_builtin_fns(&mut self, ir: &mut ir::IR) {
-        let fdecl = ir::FuncDecl { 
-            name: ir::SymbolID::insert(ir, "print"), 
-            args: vec![(ir::SymbolID::insert(ir, "a"), ir::TypeID::insert_type(ir, ir::TypeKind::String))], 
-            ret_ty: ir::TypeID::insert_type(ir, ir::TypeKind::Void) 
-        };
-        let fimpl = ir::FuncImpl {
-            decl: fdecl,
-            vars: vec![],
-            body: vec![],
-            builtin: true,
-        };
+    fn insert_builtins(&mut self, ir: &mut ir::IR) -> PrimitiveRegistry {
+        let ti32 = ir::TypeID::insert(ir, ir::TypeKind::I32);
+        let tstring = ir::TypeID::insert(ir, ir::TypeKind::String);
+        let tvoid = ir::TypeID::insert(ir, ir::TypeKind::Void);
+        let mut build_proto = |name: &'static str| {
+            let proto = BUILTIN_FNS.get(name).unwrap();
+            let fdecl = ir::FuncDecl {
+                name: ir::SymbolID::insert(ir, proto.name),
+                args: proto.args.iter().map(|ty| (ir::SymbolID::insert(ir, ""), ir::TypeID::insert(ir, ty.clone()))).collect(),
+                ret_ty: ir::TypeID::insert(ir, proto.ret_ty.clone()),
+            };
+            let fimpl = ir::FuncImpl {
+                decl: fdecl,
+                vars: vec![],
+                body: vec![],
+                builtin: true,
+            };
+            let id = ir.insert(fimpl);
+            self.builtins_fn_map.insert(proto.name, id);
 
-        let fid = ir.insert(fimpl);
-        self.builtins_fn_map.insert("print", fid);
-
-        let fdecl = ir::FuncDecl { 
-            name: ir::SymbolID::insert(ir, "to_str"), 
-            args: vec![(ir::SymbolID::insert(ir, "a"), ir::TypeID::insert_type(ir, ir::TypeKind::I32))], 
-            ret_ty: ir::TypeID::insert_type(ir, ir::TypeKind::String) 
+            id
         };
-        let fimpl = ir::FuncImpl {
-            decl: fdecl,
-            vars: vec![],
-            body: vec![],
-            builtin: true,
-        };
+        PrimitiveRegistry {
+            i32: ti32,
+            string: tstring,
+            void: tvoid,
+            print: build_proto("print"),
+            to_str: build_proto("to_str"),
+            concat: build_proto("str_concat"),
+        }
 
-        let fid = ir.insert(fimpl);
-        self.builtins_fn_map.insert("to_str", fid);
-        
     }
 
     fn insert_type_decls<'s>(&mut self, ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<'s, ()> {
@@ -440,7 +441,7 @@ impl<'a> ASTToIR<'a> {
 
     fn get_type(&self, ty: &ast::Type, ir: &mut ir::IR) -> PResult<ir::TypeID> {
         let ty_kind = self.recursively_construct_types(ty, ir)?;
-        Ok(ir::TypeID::insert_type(ir, ty_kind))
+        Ok(ir::TypeID::insert(ir, ty_kind))
     }
 
     fn make_var(&mut self, var: &ast::Var, ir: &mut ir::IR) -> PResult<ir::VarID> {
@@ -523,15 +524,15 @@ impl<'a> ASTToIR<'a> {
             ast::ExprKind::Call { path, args } => {
                 let var_ids = args
                     .iter()
-                    .map(|expr| self.insert_expr(var_map, ops, expr, parent_name, ir))
+                    .map(|expr: &ast::Expr| self.insert_expr(var_map, ops, expr, parent_name, ir))
                     .collect();
-                let func_id = *self
-                    .fn_impl_to_id
-                    .get(*self.path_map.get(path).unwrap()).unwrap_or_else(|| {
-                        assert!(is_builtin_fn(path));
-                        self.builtins_fn_map.get(path.path[0].name.view()).unwrap()
-                    });
 
+                let func_id = *self.path_map.get(path).map(|decl| {
+                    self.fn_impl_to_id.get(*decl).unwrap()
+                }).unwrap_or_else(|| {
+                    assert!(is_builtin_fn(path));
+                    self.builtins_fn_map.get(path.path[0].name.view()).unwrap()
+                });
 
                 let var = ir::VarID::new_var(ir, parent_name, None, Some(expr.span));
                 let id = ir.temporary_id();
@@ -727,7 +728,7 @@ impl<'a> ASTToIR<'a> {
             };
             let class_decl = ir::ClassDecl {
                 name: ir::SymbolID::insert(ir, name.name.view()),
-                repr_ty: ir::TypeID::insert_type(ir, ir::TypeKind::Void),
+                repr_ty: ir::TypeID::insert(ir, ir::TypeKind::Void),
             };
             let mut class_methods = vec![];
             for sdecl in sub_decls.iter() {
@@ -747,7 +748,8 @@ impl<'a> ASTToIR<'a> {
     }
 
     pub fn lower_ir<'s>(&mut self, ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<'s, ()> {
-        self.insert_builtin_fns(ir);
+        let regs = self.insert_builtins(ir);
+        ir.insert_global(regs);
         self.insert_type_decls(ir, src)?;
         self.insert_fn_impl(ir, src)?;
         self.insert_class_impls(ir);
@@ -819,6 +821,18 @@ mod ast_to_ir_test {
         .unwrap();
         // println!("{:?}", ast);
 
+        let _ir = ast_to_ir(&src, &ast).unwrap();
+        println!("{}", ir::print_basic(&_ir));
+    }
+
+    #[test]
+    fn test_call_builtin() {
+        let src = "\
+        fn main() {
+            print(to_str(1));
+        }
+        ".into();
+        let ast = parse(&src).unwrap();
         let _ir = ast_to_ir(&src, &ast).unwrap();
         println!("{}", ir::print_basic(&_ir));
     }

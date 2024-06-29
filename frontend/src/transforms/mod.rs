@@ -1,14 +1,17 @@
 use std::{
     collections::{HashMap, HashSet},
-    hash::Hash,
+    hash::Hash, rc::Rc,
 };
 
+use either::Either;
+
+use crate::prelude::*;
 use crate::query::*;
 
 use crate::ir;
 
 pub struct VarParent {
-    pub var_parent: HashMap<ir::VarID, ir::OPID>,
+    pub var_parent: HashMap<ir::VarID, Either<ir::OPID, ir::FuncID>>,
 }
 
 impl VarParent {
@@ -17,22 +20,37 @@ impl VarParent {
 
         for id in ir.iter::<ir::OPID>() {
             if let Some(v) = ir.get(id).res {
-                var_parent.insert(v, id);
+                var_parent.insert(v, Either::Left(id));
+            }
+        }
+        for id in ir.iter::<ir::FuncID>() {
+            for v in ir.get(id).vars.iter() {
+                var_parent.insert(*v, Either::Right(id));
             }
         }
 
         VarParent { var_parent }
     }
 
-    pub fn parent(&self, var: ir::VarID) -> Option<ir::OPID> {
+    pub fn parent(&self, var: ir::VarID) -> Option<Either<ir::OPID, ir::FuncID>> {
         self.var_parent.get(&var).copied()
     }
 }
 
-#[derive(Clone, Hash, PartialEq, Eq)]
-struct ContainsCycle(ir::TypeID);
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct VarParentAnalysis;
+impl Query for VarParentAnalysis {
+    type Result = Rc<VarParent>;
 
-impl Query for ContainsCycle {
+    fn query(&self, q: &QueryAnalysis) -> Self::Result {
+        Rc::new(VarParent::new(q.ir()))
+    }
+}
+
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct ContainsCycleQuery(ir::TypeID);
+
+impl Query for ContainsCycleQuery {
     type Result = bool;
 
     fn query(&self, q: &QueryAnalysis) -> Self::Result {
@@ -44,7 +62,7 @@ impl Query for ContainsCycle {
             ir::TypeKind::String => false,
             ir::TypeKind::Struct { fields } => {
                 for (_, field_ty) in fields {
-                    match q.query(ContainsCycle(*field_ty)) {
+                    match q.query(ContainsCycleQuery(*field_ty)) {
                         Ok(true) => return true,
                         Ok(false) => {}
                         Err(QueryCycle) => return true,
@@ -53,16 +71,16 @@ impl Query for ContainsCycle {
                 false
             }
             ir::TypeKind::Rec { id } => {
-                q.query(ContainsCycle(*id)).map_or(true, |x| x)
+                q.query(ContainsCycleQuery(*id)).map_or(true, |x| x)
             }
         }
     }
 }
 
 #[derive(Clone, Hash, PartialEq, Eq)]
-struct InlinedType(ir::TypeID);
+struct InlinedTypeQuery(ir::TypeID);
 
-impl Query for InlinedType {
+impl Query for InlinedTypeQuery {
     type Result = ir::TypeID;
 
     fn query(&self, q: &QueryAnalysis) -> Self::Result {
@@ -75,148 +93,182 @@ impl Query for InlinedType {
             ir::TypeKind::Struct { fields } => {
                 let field_tys = fields
                     .iter()
-                    .map(|(s, ty)| (*s, q.query(InlinedType(*ty)).unwrap()))
+                    .map(|(s, ty)| (*s, q.query(InlinedTypeQuery(*ty)).unwrap()))
                     .collect();
-                ir::TypeID::insert_type(ir, ir::TypeKind::Struct { fields: field_tys })
+                ir::TypeID::insert(ir, ir::TypeKind::Struct { fields: field_tys })
             }
             ir::TypeKind::Rec { id } => {
-                q.query(InlinedType(*id)).unwrap()
+                q.query(InlinedTypeQuery(*id)).unwrap()
             }
         }
     }
 }
 
-pub fn flatten_typedecl(ir: &mut ir::IR) {
-    let query = QueryAnalysis::new(ir);
-    let mut inlined = HashMap::new();
-    for decl_id in ir.iter::<ir::TypeDeclID>() {
-        let ty = ir.get(decl_id);
-        let cycle = query.query(ContainsCycle(ty.decl)).map_or(true, |x| x);
-        assert!(!cycle, "Cycle detected in type {:?}", ty.name.get_str(ir));
-        let inlined_ty = query.query(InlinedType(ty.decl)).unwrap();
-        inlined.insert(decl_id, inlined_ty);
-    }
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct GetAttrIdxQuery(pub ir::OPID);
 
-    for decl_id in ir.iter::<ir::TypeDeclID>()
-    {
-        let inlined_ty = inlined[&decl_id];
-        let decl = ir.get_mut(decl_id);
-        decl.decl = inlined_ty;
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct VarTypeQuery(pub ir::VarID);
+
+
+impl Query for GetAttrIdxQuery {
+    type Result = PResult<usize>;
+
+    fn query(&self, q: &QueryAnalysis) -> Self::Result {
+        let ir = q.ir();
+        let op = ir.get(self.0);
+        match &op.kind {
+            ir::OPKind::GetAttr { obj, attr, .. } => {
+                let ty = q.query(VarTypeQuery(*obj)).unwrap()?;
+                let struct_ty = ir.get(ty);
+                let idx = match &struct_ty.kind {
+                    ir::TypeKind::Struct { fields } => {
+                        fields.iter().position(|(name, _)| *name == *attr).unwrap()
+                    }
+                    _ => {
+                        return Err(ProgramError {
+                            span: Some(op.span),
+                            error_message: "Invalid get attribute on non-struct type",
+                            ..Default::default()
+                        })
+                    },
+                };
+                Ok(idx)
+            },
+            _ => panic!("Expected GetAttr, got {:?}", op.kind),
+        }
     }
 }
 
-struct BasicTypeInfer<'a> {
-    var_types: HashMap<ir::VarID, ir::TypeID>,
-    get_attr_idx: HashMap<ir::OPID, usize>,
-    var_parent: &'a VarParent,
-    ir: &'a ir::IR,
-}
 
-impl<'a> BasicTypeInfer<'a> {
-    fn new(ir: &'a ir::IR, var_parent: &'a VarParent) -> Self {
-        let var_types = HashMap::new();
-        BasicTypeInfer {
-            var_types,
-            var_parent,
-            get_attr_idx: HashMap::new(),
-            ir,
-        }
-    }
+impl Query for VarTypeQuery {
+    type Result = PResult<ir::TypeID>;
 
-    fn type_of(&mut self, id: ir::VarID) -> ir::TypeID {
-        if let Some(ty) = self.var_types.get(&id) {
-            return *ty;
-        }
-        let var = self.ir.get(id);
-        if let Some(ty) = var.ty {
-            self.var_types.insert(id, ty);
-            return ty;
-        }
+    fn query(&self, q: &QueryAnalysis) -> Self::Result {
+        let ir = q.ir();
+        let prim = ir.get_global::<PrimitiveRegistry>().unwrap();
+        let parent = q.query(VarParentAnalysis).unwrap().parent(self.0).unwrap();
+        let Either::Left(parent) = parent else {
+            return Ok(ir.get(self.0).ty.unwrap());
+        };
 
-        let parent = self
-            .var_parent
-            .parent(id)
-            .expect(&format!("No parent for var {:?}", id.name_of(self.ir)));
-        let op = self.ir.get(parent);
+        let op = ir.get(parent);
         let ty = match &op.kind {
-            ir::OPKind::Add { .. } => {
-                // TODO: should check types
-                ir::TypeID::insert_type(&mut self.ir, ir::TypeKind::I32)
+            ir::OPKind::Add { lhs, rhs } => {
+                let lty = q.query(VarTypeQuery(*lhs)).unwrap()?;
+                let rty = q.query(VarTypeQuery(*rhs)).unwrap()?;
+                if lty != rty {
+                    return Err(ProgramError {
+                        span: Some(op.span),
+                        error_message: "Type mismatch",
+                        ..Default::default()
+                    });
+                }
+                if lty == prim.string {
+                    prim.string
+                } else if lty == prim.i32 {
+                    prim.i32
+                } else {
+                    return Err(ProgramError {
+                        span: Some(op.span),
+                        error_message: "Invalid type for add",
+                        ..Default::default()
+                    });
+                }
             }
             ir::OPKind::GetAttr { obj, attr, .. } => {
-                let ty = self.type_of(*obj);
-                let mut struct_ty = self.ir.get(ty);
-                if let ir::TypeKind::Rec { id } = &struct_ty.kind {;
-                    struct_ty = self.ir.get(*id);
+                let ty = q.query(VarTypeQuery(*obj)).unwrap()?;
+                let mut struct_ty = ir.get(ty);
+                // assume no cycle
+                while let ir::TypeKind::Rec { id } = &struct_ty.kind {
+                    struct_ty = ir.get(*id);
                 }
+
                 if let ir::TypeKind::Struct { fields } = &struct_ty.kind {
                     let idx = fields.iter().position(|(name, _)| *name == *attr).unwrap();
                     let field_ty = fields[idx].1;
-                    self.get_attr_idx.insert(parent, idx);
+                    q.query_default(GetAttrIdxQuery(parent), || Ok(idx)).unwrap()?;
                     field_ty
                 } else {
-                    panic!("Expected struct type, got {:?}", struct_ty.kind);
+                    return Err(ProgramError {
+                        span: Some(op.span),
+                        error_message: "Expected struct type for get attribute",
+                        ..Default::default()
+                    });
                 }
             }
             ir::OPKind::Call { func, .. } => {
-                let decl = self.ir.get(*func);
+                let decl = ir.get(*func);
                 decl.decl.ret_ty
             }
             ir::OPKind::Struct { fields } => {
                 let field_tys = fields
                     .iter()
-                    .map(|(s, var)| (*s, self.type_of(*var)))
-                    .collect();
-                let struct_ty = ir::TypeID::insert_type(
-                    &mut self.ir,
+                    .map(|(s, var)| Ok((*s, q.query(VarTypeQuery(*var)).unwrap()?)))
+                    .collect::<PResult<_>>()?;
+                let struct_ty = ir::TypeID::insert(
+                    ir,
                     ir::TypeKind::Struct { fields: field_tys },
                 );
                 struct_ty
             }
-            ir::OPKind::Constant { .. } => ir::TypeID::insert_type(&mut self.ir, ir::TypeKind::I32),
+            ir::OPKind::Constant(c) => {
+                match c {
+                    ir::ConstKind::I32(_) => prim.i32,
+                    ir::ConstKind::String(_) => prim.string,
+                }
+            },
             _ => panic!("Unexpected op kind"),
         };
-
-        self.var_types.insert(id, ty);
-
-        ty
+        if let Some(var_ty) = ir.get(self.0).ty {
+            if var_ty != ty {
+                return Err(ProgramError {
+                    span: Some(op.span),
+                    error_message: "Type mismatch",
+                    ..Default::default()
+                });
+            }
+        }
+        Ok(ty)
     }
 }
 
-fn rewrite_var_types(ir: &mut ir::IR) {
-    let var_parent = VarParent::new(ir);
-    let mut infer = BasicTypeInfer::new(ir, &var_parent);
 
-    for id in ir.iter::<ir::VarID>() {
-        infer.type_of(id);
+fn rewrite_var_types<'s>(ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<'s, ()> {
+    let query = QueryAnalysis::new(ir);
+    
+    let var_ids = ir.iter::<ir::VarID>().collect::<Vec<_>>();
+    for id in var_ids.iter() {
+        let ty = query.query(VarTypeQuery(*id)).unwrap();
+        if let Err(e) = ty {
+            src.add_err(e);
+        }
     }
+    src.commit_error(())?;
 
-    let BasicTypeInfer {
-        var_types,
-        get_attr_idx,
-        ..
-    } = infer;
-    let var_ids = ir.iter::<ir::VarID>();
-    for id in var_ids {
-        let ty = var_types[&id];
-        let var = ir.get_mut(id);
-        var.ty = Some(ty);
-    }
+    let query = query.finish();
 
     let op_ids = ir.iter::<ir::OPID>();
     for id in op_ids {
         let op = ir.get_mut(id);
         match &mut op.kind {
             ir::OPKind::GetAttr { idx, .. } => {
-                *idx = Some(get_attr_idx[&id]);
+                *idx = Some(query.get(&GetAttrIdxQuery(id)).unwrap().unwrap());
             }
             _ => {}
         }
     }
+
+    for var_ids in var_ids {
+        let ty = query.get(&VarTypeQuery(var_ids)).unwrap().unwrap();
+        ir.get_mut(var_ids).ty = Some(ty);
+    }
+
+    Ok(())
 }
 
-pub fn transform_ir(ir: &mut ir::IR) {
-    rewrite_var_types(ir);
+pub fn transform_ir<'s>(ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<'s, ()> {
+    rewrite_var_types(ir, src)
 }
 
 
@@ -228,7 +280,7 @@ mod test_type_infer {
         let src = s.into();
         let ast = crate::parse(&src).unwrap();
         let mut ir = crate::ast_to_ir(&src, &ast).unwrap();
-        rewrite_var_types(&mut ir);
+        rewrite_var_types(&mut ir, &src).unwrap();
         ir
     }
 
@@ -283,6 +335,21 @@ mod test_type_infer {
         ",
         );
         println!("{}", ir::print_basic(&_ir));
+    }
+
+    #[test]
+    fn test_str() {
+        let _ir = generate_ir_from_str(
+            "\
+            fn foo(a: String): String {
+                let b = to_str(1);
+                let c = (a + \"1\");
+                return (b + c);
+            }
+            "
+        );
+        println!("{}", ir::print_basic(&_ir));
+
     }
 }
 

@@ -212,7 +212,7 @@ impl<T: Iterator<Item = char>> Lexer<T> {
     }
 
     fn fill_ident(&mut self) {
-        self.fill_buf(|c| c.is_alphanumeric());
+        self.fill_buf(|c| c.is_alphanumeric() || c == '_');
     }
 
     fn ignore_line(&mut self) {
@@ -240,7 +240,7 @@ impl<T: Iterator<Item = char>> Lexer<T> {
     }
 
     fn is_ident(&self) -> bool {
-        self.buf[0].is_alphabetic() && self.buf.iter().all(|c| c.is_alphanumeric())
+        self.buf[0].is_alphabetic() && self.buf.iter().all(|c| c.is_alphanumeric() || *c == '_')
     }
 
     fn get_loc(&self) -> Loc {
@@ -512,5 +512,14 @@ mod test_lex {
         let mut lexer = Lexer::new(input.chars());
         let (l, tok, r) = lexer.next().unwrap().unwrap();
         assert!(matches!(tok, Tok::String(s) if &s == "🥲"));
+    }
+
+    #[test]
+    fn test_lex_call() {
+        let input = "fn main() { to_str(1, 2); }";
+        let lexer = Lexer::new(input.chars());
+        for i in lexer {
+            println!("{:?}", i);
+        }
     }
 }
