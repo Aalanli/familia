@@ -38,13 +38,14 @@ enum OptLevel {
 fn main() {
     let args = Cli::parse();
     let text = std::fs::read_to_string(&args.file).unwrap();
-    let ast = frontend::parse(text, Some(args.file.into())).unwrap();
-    let mut ir = frontend::ast_to_ir(&ast).unwrap();
+    let src = frontend::ModSource::new(Some(args.file.clone()), text);
+    let ast = frontend::parse(&src).unwrap();
+    let mut ir = frontend::ast_to_ir(&src, &ast).unwrap();
     let opt = match args.opt_level {
         OptLevel::None => codegen::OptLevel::None,
         OptLevel::O1 => codegen::OptLevel::O1,
     };
-    frontend::transform_ir(&mut ir);
+    frontend::transform_ir(&mut ir, &src).unwrap();
     let result = match args.mode {
         Mode::DumpIR => frontend::ir::print_basic(&ir),
         Mode::DumpLLVM => codegen::generate_llvm(&ir, opt).unwrap(),

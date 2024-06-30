@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <string>
+#include <sys/types.h>
 #include <vector>
 #include <iostream>
 #include <cstring>
@@ -23,6 +24,7 @@ struct TraceConfig {
 // config contains a pointer to a TraceConfig, which contains the offsets to other AllocPtrs
 struct AllocPtr {
     TraceConfig* config; // nullptr if does not contain subtraces
+    u_int64_t len; // length of the data
     char data[1]; // this is a flexible array member
 };
 
@@ -31,6 +33,7 @@ struct AllocPtr {
 struct GC {
     unordered_set<AllocPtr*> nodes;
     unordered_set<AllocPtr*> roots;
+    u_int64_t allocated = 0;
     ~GC() {
         for (auto node : nodes) {
             free(node);
@@ -68,8 +71,14 @@ void __rts_gc_destroy() {
 AllocPtr* __rts_gc_alloc(TraceConfig* config, int bytes) {
     AllocPtr* node = (AllocPtr*) malloc(offsetof(AllocPtr, data[bytes]));
     node->config = config;
+    node->len = (u_int64_t) bytes;
     gc->nodes.insert(node);
+    gc->allocated += bytes;
     return node;
+}
+
+char* __rts_get_data(AllocPtr* node) {
+    return node->data;
 }
 
 void __rts_gc_add_root(AllocPtr* node) {
@@ -97,6 +106,7 @@ void __rts_gc_collect() {
     }
     for (auto it = gc->nodes.begin(); it != gc->nodes.end();) {
         if (visited.find(*it) == visited.end()) {
+            gc->allocated -= (*it)->len;
             free(*it);
             it = gc->nodes.erase(it);
         } else {
@@ -109,28 +119,31 @@ struct rts_string {
     AllocPtr ptr;
 };
 
-rts_string* __rts_new_string(int64_t length) {
-    auto ptr = __rts_gc_alloc(nullptr, length + 8);
-    ((int64_t*) ptr->data)[0] = length;
+rts_string* __rts_new_string(int length, const char* data) {
+    auto ptr = __rts_gc_alloc(nullptr, length + sizeof(int));
+    ((int*) ptr->data)[0] = length;
+    if (data != nullptr) {
+        memcpy(ptr->data + sizeof(int), data, length);
+    }
     return (rts_string*) ptr;
 }
 
-int64_t __rts_string_length(const rts_string* str) {
-    return ((int64_t*) str->ptr.data)[0];
+int __rts_string_length(const rts_string* str) {
+    return ((int*) str->ptr.data)[0];
 }
 
 char* __rts_string_data(rts_string* str) {
-    return str->ptr.data + sizeof(int64_t);
+    return str->ptr.data + sizeof(int);
 }
 
-void __rts_print_string(rts_string* str) {
-    cout.write(__rts_string_data(str), ((int64_t*) str->ptr.data)[0]);
+void __rts_string_print(rts_string* str) {
+    cout.write(__rts_string_data(str), ((int*) str->ptr.data)[0]);
 }
 
-rts_string* __rts_concat_string(rts_string* a, rts_string* b) {
+rts_string* __rts_string_concat(rts_string* a, rts_string* b) {
     auto len_a = __rts_string_length(a);
     auto len_b = __rts_string_length(b);
-    auto str = __rts_new_string(len_a + len_b);
+    auto str = __rts_new_string(len_a + len_b, nullptr);
     auto data = __rts_string_data(str);
     memcpy(data, __rts_string_data(a), len_a);
     memcpy(data + len_a, __rts_string_data(b), len_b);
@@ -139,10 +152,8 @@ rts_string* __rts_concat_string(rts_string* a, rts_string* b) {
 
 rts_string* __rts_int_to_string(int n) {
     string s = to_string(n);
-    auto result = __rts_new_string(s.size());
-    memcpy(__rts_string_data(result), s.data(), s.size());
+    auto result = __rts_new_string(s.size(), s.data());
     return result;
 }
 
 }
-

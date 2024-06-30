@@ -1,13 +1,38 @@
 use std::any::{self, Any};
+use std::fmt::Display;
 use std::hash::Hash;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub use super::registry::NodeID;
 use super::registry::{GenericUniqueRegistry, Registry};
 use crate::ast::Span;
 
+/// Attributes are information computed in the passes
+/// they are uniqued by type to each node
+/// as_str expects a single line string
+pub trait Attribute: 'static {
+    fn as_any(&self) -> &dyn Any;
+    fn as_str(&self) -> String;
+    fn name(&self) -> &'static str;
+}
+
+impl<T: Display + 'static> Attribute for T {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_str(&self) -> String {
+        self.to_string()
+    }
+
+    fn name(&self) -> &'static str {
+        std::any::type_name::<T>()
+    }
+}
+
 pub struct IR {
     globals: HashMap<any::TypeId, Box<dyn Any>>,
+    attributes: HashMap<NodeID, HashMap<any::TypeId, Box<dyn Attribute>>>,
     registry: Registry<dyn Any>,
     unique_registry: GenericUniqueRegistry,
 }
@@ -17,6 +42,7 @@ impl IR {
         IR {
             globals: HashMap::new(),
             registry: Registry::new(),
+            attributes: HashMap::new(),
             unique_registry: GenericUniqueRegistry::new(),
         }
     }
@@ -39,6 +65,14 @@ impl IR {
 
     pub fn get_global_mut<T: 'static>(&mut self) -> Option<&mut T> {
         self.globals.get_mut(&std::any::TypeId::of::<T>()).and_then(|any| any.downcast_mut::<T>())
+    }
+
+    pub fn delete<I: ID>(&mut self, id: I) {
+        if I::IS_UNIQUE {
+            self.unique_registry.delete(id.id());
+        } else {
+            self.registry.pop_boxed(id.id());
+        }
     }
 
     pub fn get<I: ID>(&self, id: I) -> &I::Node {
@@ -83,6 +117,16 @@ impl IR {
         } else {
             I::new(self.registry.temporary_id())
         }
+    }
+
+    pub fn insert_attribute<A: Attribute, I: ID>(&mut self, id: I, attr: A) {
+        let map = self.attributes.entry(id.id()).or_insert_with(HashMap::new);
+        map.insert(any::TypeId::of::<A>(), Box::new(attr));
+    }
+
+    pub fn get_attribute<A: Attribute, I: ID>(&self, id: I) -> Option<&A> {
+        let map = self.attributes.get(&id.id())?;
+        map.get(&any::TypeId::of::<A>())?.as_any().downcast_ref::<A>()
     }
 
     pub fn iter<I: ID>(&self) -> impl Iterator<Item = I> {
@@ -253,6 +297,7 @@ pub enum TypeKind {
     String,
     Struct { fields: Vec<(SymbolID, TypeID)> },
     Rec { id: TypeID },
+    Ptr,
 }
 
 impl Default for TypeKind {
@@ -282,7 +327,6 @@ impl_id!(OPID, OP, false);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OP {
-    pub id: OPID,
     pub kind: OPKind,
     pub res: Option<VarID>,
     pub span: Span,
@@ -321,7 +365,17 @@ pub enum OPKind {
 pub enum ConstKind {
     I32(i32),
     String(SymbolID),
+    IArray(Vec<i32>),
 }
+
+impl_id!(GlobalConstID, GlobalConst, false);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct GlobalConst {
+    pub var: VarID,
+    pub value: ConstKind,
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ClassDecl {

@@ -91,6 +91,10 @@ impl<T: ?Sized> Registry<T> {
         self.id.set(id + 1);
         NodeID { id }
     }
+
+    pub fn pop_boxed(&mut self, id: NodeID) -> Option<Box<T>> {
+        self.data.borrow_mut().remove(&id.id)
+    }
 }
 
 use crate::query::DefaultIdentity;
@@ -117,6 +121,12 @@ impl GenericUniqueRegistry {
     {
         let val: &dyn DefaultIdentity = value;
         self.rev.borrow().contains_key(val)
+    }
+
+    pub fn delete(&mut self, id: NodeID) {
+        let mut value = self.data.borrow_mut().remove(&id.id).unwrap();
+        let val: &dyn DefaultIdentity = value.as_ref();
+        self.rev.borrow_mut().remove(val);
     }
 
     pub fn insert<T: DefaultIdentity>(&self, value: T) -> NodeID {

@@ -80,11 +80,6 @@ lazy_static!(
             args: vec![ir::TypeKind::I32], 
             ret_ty: ir::TypeKind::String
         });
-        m.insert("str_concat", BuiltinFnProto { 
-            name: "str_concat", 
-            args: vec![ir::TypeKind::String, ir::TypeKind::String], 
-            ret_ty: ir::TypeKind::String
-        });
         m
     };
 
@@ -320,7 +315,6 @@ pub struct PrimitiveRegistry {
     pub void: ir::TypeID,
     pub print: ir::FuncID,
     pub to_str: ir::FuncID,
-    pub concat: ir::FuncID,
 
 }
 
@@ -399,7 +393,6 @@ impl<'a> ASTToIR<'a> {
             void: tvoid,
             print: build_proto("print"),
             to_str: build_proto("to_str"),
-            concat: build_proto("str_concat"),
         }
 
     }
@@ -480,7 +473,6 @@ impl<'a> ASTToIR<'a> {
                         kind: ir::OPKind::Constant(ir::ConstKind::I32(*i)),
                         span: expr.span,
                         res: Some(var),
-                        id,
                     },
                 );
                 ops.push(id);
@@ -495,7 +487,6 @@ impl<'a> ASTToIR<'a> {
                         kind: ir::OPKind::Constant(ir::ConstKind::String(ir::SymbolID::insert(ir, s))),
                         span: expr.span,
                         res: Some(var),
-                        id,
                     },
                 );
                 ops.push(id);
@@ -515,7 +506,6 @@ impl<'a> ASTToIR<'a> {
                         },
                         span: expr.span,
                         res: Some(var),
-                        id,
                     },
                 );
                 ops.push(id);
@@ -533,7 +523,7 @@ impl<'a> ASTToIR<'a> {
                     assert!(is_builtin_fn(path));
                     self.builtins_fn_map.get(path.path[0].name.view()).unwrap()
                 });
-
+                let func_ret = ir.get(func_id).decl.ret_ty;
                 let var = ir::VarID::new_var(ir, parent_name, None, Some(expr.span));
                 let id = ir.temporary_id();
                 ir.insert_with(
@@ -545,7 +535,6 @@ impl<'a> ASTToIR<'a> {
                         },
                         span: expr.span,
                         res: Some(var),
-                        id,
                     },
                 );
                 ops.push(id);
@@ -565,7 +554,6 @@ impl<'a> ASTToIR<'a> {
                         },
                         span: expr.span,
                         res: Some(var),
-                        id,
                     },
                 );
                 ops.push(id);
@@ -585,7 +573,6 @@ impl<'a> ASTToIR<'a> {
                         kind: ir::OPKind::Struct { fields: field_ids },
                         span: expr.span,
                         res: Some(var),
-                        id,
                     },
                 );
                 ops.push(id);
@@ -629,7 +616,6 @@ impl<'a> ASTToIR<'a> {
                 kind: op_kind,
                 span: stmt.span,
                 res: None,
-                id: op_id,
             },
         );
         ops.push(op_id);

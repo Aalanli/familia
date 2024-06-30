@@ -5,7 +5,7 @@ use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::types::{AsTypeRef, BasicType, BasicTypeEnum, PointerType};
 use inkwell::values::{BasicValueEnum, PointerValue};
-use inkwell::OptimizationLevel;
+use inkwell::{AddressSpace, OptimizationLevel};
 
 use anyhow::Result;
 
@@ -73,12 +73,18 @@ fn generate_llvm_type<'ctx, 'ir>(
         }
         ir::TypeKind::Rec { id: decl } => code
             .context
-            .get_struct_type(&ir.namer.name_type_decl(*decl))
+            .get_struct_type(&ir.namer.try_name_type(*decl).unwrap())
             .unwrap()
             .into(),
         ir::TypeKind::I32 => code.context.i32_type().into(),
         ir::TypeKind::Void => {
             panic!("void type not allowed here");
+        }
+        ir::TypeKind::String => {
+            code.context.ptr_type(AddressSpace::default()).into()
+        }
+        ir::TypeKind::Ptr => {
+            code.context.ptr_type(AddressSpace::default()).into()
         }
     };
     code.types.insert(ty_id, res);
@@ -130,10 +136,14 @@ fn codegen_fn<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
         }
         code.module
             .add_function(&ir.namer.name_func(func_id), fn_type, None);
+        
     }
 
     for func_id in ir.ir.iter::<ir::FuncID>() {
         let func = ir.ir.get(func_id);
+        if func.builtin {
+            continue;
+        }
         let llvm_func = code
             .module
             .get_function(ir.namer.name_func(func_id))
@@ -158,11 +168,25 @@ fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, op: i
     let op = ir.ir.get(op);
     match &op.kind {
         // every var corresponds to a stack pointer
-        ir::OPKind::Constant { value } => {
-            let const_val = code.context.i32_type().const_int(*value as u64, false);
-            let var = code.new_stack_var(ir, op.res.unwrap());
-            code.builder.build_store(var, const_val).unwrap();
-            code.var_ids.insert(op.res.unwrap(), var);
+        ir::OPKind::Constant(c) => {
+            match c {
+                ir::ConstKind::I32(value) => {
+                    let const_val = code.context.i32_type().const_int(*value as u64, false);
+                    let var = code.new_stack_var(ir, op.res.unwrap());
+                    code.builder.build_store(var, const_val).unwrap();
+                }
+                ir::ConstKind::String(s) => {
+                    let str = s.get_str(&ir.ir);
+                    let str_val = code.builder.build_global_string_ptr(str, "str").unwrap();
+                    
+                    let res = code.new_stack_var(ir, op.res.unwrap());
+                    let rts_new_str = code.module.get_function("__rts_new_string").unwrap();
+                    let const_len = code.context.i32_type().const_int(str.as_bytes().len() as u64, false);
+                    let ptr = code.builder.build_call(rts_new_str, &[const_len.into(), str_val.as_pointer_value().into()], "").unwrap();
+                    code.builder.build_store(res, ptr.try_as_basic_value().left().unwrap()).unwrap();                
+                },
+                _ => unimplemented!("codegen for {:?}", c),
+            }
         }
         ir::OPKind::Add { lhs, rhs } => {
             let lhs_llvm = code.load_var(ir, *lhs);
@@ -197,16 +221,19 @@ fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, op: i
                     arg_val.into()
                 })
                 .collect::<Vec<_>>();
-            let res_ptr = code.new_stack_var(ir, op.res.unwrap());
+            
             let res_val = code
-                .builder
-                .build_call(func, &args, "call")
-                .unwrap()
-                .try_as_basic_value();
-            if res_val.is_left() {
-                code.builder
-                    .build_store(res_ptr, res_val.left().unwrap())
-                    .unwrap();
+            .builder
+            .build_call(func, &args, "call")
+            .unwrap()
+            .try_as_basic_value();
+            if !(op.res.is_none() || op.res.unwrap().type_of(&ir.ir) == ir::TypeID::insert(&ir.ir, ir::TypeKind::Void)) {
+                let res_ptr = code.new_stack_var(ir, op.res.unwrap());
+                if res_val.is_left() {
+                    code.builder
+                        .build_store(res_ptr, res_val.left().unwrap())
+                        .unwrap();
+                }
             }
         }
         ir::OPKind::GetAttr { obj, idx, .. } => {
@@ -322,7 +349,7 @@ pub fn generate_llvm(ir: &ir::IR, opt_level: OptLevel) -> Result<String> {
 
     let ir_state = IRState {
         ir,
-        namer: ir::IRNamer::new(ir, true),
+        namer: ir::IRNamer::new(ir),
     };
 
     codegen_type_decls(&mut codegen, &ir_state);
@@ -477,10 +504,49 @@ mod tests {
 
     }
 
+    #[test]
+    fn test_const_str() {
+        let context = Context::create();
+        let module = context.create_module("test");
+        let builder = context.create_builder();
+        let print_ty = context.void_type().fn_type(&[context.ptr_type(AddressSpace::default()).into()], false);
+        let foo_ty = context.void_type().fn_type(&[], false);
+        module.add_function("print", print_ty, None);
+        let foo = module.add_function("foo", foo_ty, None);
+        let entry = context.append_basic_block(foo, "entry");
+        builder.position_at_end(entry);
+        let print = module.get_function("print").unwrap();
+        // let str_arr = context.const_string("hello".as_bytes(), false);
+        // let local = builder.build_alloca(str_arr.get_type(), "str").unwrap();
+        // builder.build_store(local, str_arr).unwrap();
+
+        // let str_ptr = builder.build_bit_cast(local, context.ptr_type(AddressSpace::default()), "str_ptr").unwrap();
+        // // let str_ptr = builder.build_global_string_ptr("hello world", "str").unwrap();
+        // // let str_val = builder.build_load(str_ptr.get_value_type().into(), str_ptr.into(), "").unwrap();
+
+        // builder.build_call(print, &[str_ptr.into()], "").unwrap();
+
+
+        let str = builder.build_global_string_ptr("hello", "str").unwrap();
+        let str_ptr = str.as_pointer_value();
+
+        builder.build_call(print, &[str_ptr.into()], "").unwrap();
+
+        let str = builder.build_global_string_ptr("hello2", "str").unwrap();
+        let str_ptr = str.as_pointer_value();
+
+        builder.build_call(print, &[str_ptr.into()], "").unwrap();
+
+        builder.build_return(None).unwrap();
+        let module_str = module.print_to_string().to_string();
+        println!("{}", module_str);
+    }
+
     fn run_frontend(s: &str) -> ir::IR {
-        let ast = frontend::parse(s.into(), None).unwrap();
-        let mut ir = frontend::ast_to_ir(&ast).unwrap();
-        frontend::transform_ir(&mut ir);
+        let src = s.into();
+        let ast = frontend::parse(&src).unwrap();
+        let mut ir = frontend::ast_to_ir(&src, &ast).unwrap();
+        frontend::transform_ir(&mut ir, &src).unwrap();
         ir
     }
 
@@ -495,7 +561,7 @@ mod tests {
         ",
         );
 
-        // println!("{}", ir::print_basic(&ir));
+        println!("{}", ir::print_basic(&ir));
 
         let llvm = generate_llvm(&ir, Default::default()).unwrap();
         println!("{}", llvm);
@@ -539,6 +605,24 @@ mod tests {
 
             }
         ",
+        );
+        println!("{}", ir::print_basic(&ir));
+        let llvm = generate_llvm(&ir, Default::default()).unwrap();
+        println!("{}", llvm);
+    }
+
+    #[test]
+    fn test_codegen4() {
+        let ir = run_frontend(
+            "\
+            fn foo(a: String): String {
+                let b = to_str(1);
+                let b1 = \"2\";
+                let c = (a + \"1\");
+                print(c);
+                return (b + c);
+            }
+            ",
         );
         println!("{}", ir::print_basic(&ir));
         let llvm = generate_llvm(&ir, Default::default()).unwrap();

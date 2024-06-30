@@ -27,6 +27,7 @@ pub struct IRNamer {
     type_decl_tys: HashMap<TypeID, TypeDeclID>,
     class_prefix_ids: HashMap<ClassID, String>,
     var_prefix: HashMap<VarID, String>,
+    global_prefix: HashMap<GlobalConstID, String>,
     cache: RefCell<HashMap<NodeID, Box<str>>>,
 }
 
@@ -41,6 +42,7 @@ impl IRNamer {
             }).collect::<HashMap<_, _>>(),
             class_prefix_ids: Self::compute_id_name(ir, |id: ClassID| ir.get(id).decl.name.get_str(ir).into()),
             var_prefix: Self::compute_id_name(ir, |id: VarID| ir.get(id).name.get_str(ir).into()),
+            global_prefix: Self::compute_id_name(ir, |id: GlobalConstID| ir.get(ir.get(id).var).name.get_str(ir).into()),
             cache: RefCell::new(HashMap::new()),
         }
     }
@@ -51,7 +53,7 @@ impl IRNamer {
         for id in ir.iter_stable::<T>() {
             let name = prefix(id);
             if !inserted.contains_key(&name) {
-                inserted.insert(name.clone(), 0);
+                inserted.insert(name.to_string(), 0);
                 names.insert(id, if name == "" { "0".to_string() } else { name });
             } else {
                 let count = inserted.get_mut(&name).unwrap();
@@ -98,6 +100,10 @@ impl IRNamer {
     pub fn name_class(&self, class: ClassID) -> &str {
         self.cacher(class.id(), || format!("{}", self.class_prefix_ids[&class]))
     }
+
+    pub fn name_global(&self, global: GlobalConstID) -> &str {
+        self.cacher(global.id(), || format!("{}", self.global_prefix[&global]))
+    }
 }
 
 pub struct BasicPrinter<'ir> {
@@ -113,9 +119,8 @@ impl<'ir> BasicPrinter<'ir> {
         }
     }
 
-    pub fn print_type(&self, ty: TypeID) -> String {
-        let ty = self.ir.get(ty);
-        match &ty.kind {
+    pub fn print_tykind(&self, ty: &TypeKind) -> String {
+        match ty {
             TypeKind::Struct { fields } => {
                 return arg_list(
                     "{",
@@ -133,6 +138,9 @@ impl<'ir> BasicPrinter<'ir> {
             TypeKind::Rec { id: decl } => {
                 return format!("@{}", self.ir_namer.try_name_type(*decl).unwrap_or("rec"));
             }
+            TypeKind::Ptr => {
+                return format!("@ptr");
+            }
             TypeKind::I32 => {
                 return "i32".to_string();
             }
@@ -143,6 +151,11 @@ impl<'ir> BasicPrinter<'ir> {
                 return "String".to_string();
             }
         }
+    }
+
+    pub fn print_type(&self, ty: TypeID) -> String {
+        let ty = self.ir.get(ty);
+        self.print_tykind(&ty.kind)
     }
 
     pub fn print_type_decl(&self, ty_id: TypeDeclID) -> String {
@@ -160,6 +173,26 @@ impl<'ir> BasicPrinter<'ir> {
         format!("%{}: {}", self.ir_namer.name_var(var_id), ty)
     }
 
+    pub fn print_constkind(&self, c: &ConstKind) -> String {
+        match c {
+            ConstKind::I32(i) => {
+                return format!("constant({})", i);
+            }
+            ConstKind::String(s) => {
+                return format!("constant(\"{}\")", s.get_str(self.ir));
+            }
+            ConstKind::IArray(v) => {
+                let args = arg_list(
+                    "[",
+                    "]",
+                    ", ",
+                    v.iter().map(|i| format!("{}", i)),
+                );
+                return format!("constant({})", args);
+            }
+        }
+    }
+
     pub fn print_op(&self, op_id: &OPID) -> String {
         let op = self.ir.get(*op_id);
         let args;
@@ -170,14 +203,7 @@ impl<'ir> BasicPrinter<'ir> {
                 name = "assign";
             }
             OPKind::Constant(c) => {
-                match c {
-                    ConstKind::I32(i) => {
-                        return format!("{} = constant({})", self.print_var(op.res.unwrap()), i);
-                    }
-                    ConstKind::String(s) => {
-                        return format!("{} = constant(\"{}\")", self.print_var(op.res.unwrap()), s.get_str(self.ir));
-                    }
-                }
+                return format!("{} = {}", self.print_var(op.res.unwrap()), self.print_constkind(c));
             }
             OPKind::Add { lhs, rhs } => {
                 args = vec![*lhs, *rhs];
@@ -224,12 +250,23 @@ impl<'ir> BasicPrinter<'ir> {
 
     pub fn print_function(&self, func_id: FuncID) -> String {
         let func = self.ir.get(func_id);
-        let args = arg_list(
-            "(",
-            ")",
-            ", ",
-            func.vars.iter().map(|var| self.print_var(*var)),
-        );
+        let args = if func.builtin {
+                arg_list(
+                "(",
+                ")",
+                ", ",
+                func.decl.args.iter()
+                    .map(|(_, ty)| format!("{}", self.print_type(*ty))),
+            )
+        } else {
+            arg_list(
+                "(",
+                ")",
+                ", ",
+                func.vars.iter()
+                    .map(|v| self.print_var(*v)),
+            )
+        };
         let ret_ty = self.print_type(func.decl.ret_ty);
         let prefix = self.ir_namer.name_func(func_id);
         if func.builtin {
@@ -277,10 +314,18 @@ impl<'ir> BasicPrinter<'ir> {
         str
     }
 
+    pub fn print_global(&self, global_id: GlobalConstID) -> String {
+        let global = self.ir.get(global_id);
+        format!("global @{} = {}", self.print_var(global.var), self.print_constkind(&global.value))
+    }
+
     pub fn print_ir(&self) -> String {
         let mut lines = Vec::new();
         for id in self.ir.iter_stable::<TypeDeclID>() {
             lines.push(self.print_type_decl(id));
+        }
+        for id in self.ir.iter_stable::<GlobalConstID>() {
+            lines.push(self.print_global(id));
         }
         for id in self.ir.iter_stable::<FuncID>() {
             lines.push(self.print_function(id));
