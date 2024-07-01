@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
-    hash::Hash, rc::Rc,
+    hash::Hash,
+    rc::Rc,
 };
 
 use either::Either;
@@ -72,9 +73,7 @@ impl Query for ContainsCycleQuery {
                 }
                 false
             }
-            ir::TypeKind::Rec { id } => {
-                q.query(ContainsCycleQuery(*id)).map_or(true, |x| x)
-            }
+            ir::TypeKind::Rec { id } => q.query(ContainsCycleQuery(*id)).map_or(true, |x| x),
         }
     }
 }
@@ -100,9 +99,7 @@ impl Query for InlinedTypeQuery {
                     .collect();
                 ir::TypeID::insert(ir, ir::TypeKind::Struct { fields: field_tys })
             }
-            ir::TypeKind::Rec { id } => {
-                q.query(InlinedTypeQuery(*id)).unwrap()
-            }
+            ir::TypeKind::Rec { id } => q.query(InlinedTypeQuery(*id)).unwrap(),
         }
     }
 }
@@ -112,7 +109,6 @@ struct GetAttrIdxQuery(pub ir::OPID);
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct VarTypeQuery(pub ir::VarID);
-
 
 impl Query for GetAttrIdxQuery {
     type Result = PResult<usize>;
@@ -134,15 +130,14 @@ impl Query for GetAttrIdxQuery {
                             error_message: "Invalid get attribute on non-struct type",
                             ..Default::default()
                         })
-                    },
+                    }
                 };
                 Ok(idx)
-            },
+            }
             _ => panic!("Expected GetAttr, got {:?}", op.kind),
         }
     }
 }
-
 
 impl Query for VarTypeQuery {
     type Result = PResult<ir::TypeID>;
@@ -190,7 +185,8 @@ impl Query for VarTypeQuery {
                 if let ir::TypeKind::Struct { fields } = &struct_ty.kind {
                     let idx = fields.iter().position(|(name, _)| *name == *attr).unwrap();
                     let field_ty = fields[idx].1;
-                    q.query_default(GetAttrIdxQuery(parent), || Ok(idx)).unwrap()?;
+                    q.query_default(GetAttrIdxQuery(parent), || Ok(idx))
+                        .unwrap()?;
                     field_ty
                 } else {
                     return Err(ProgramError {
@@ -209,18 +205,13 @@ impl Query for VarTypeQuery {
                     .iter()
                     .map(|(s, var)| Ok((*s, q.query(VarTypeQuery(*var)).unwrap()?)))
                     .collect::<PResult<_>>()?;
-                let struct_ty = ir::TypeID::insert(
-                    ir,
-                    ir::TypeKind::Struct { fields: field_tys },
-                );
+                let struct_ty = ir::TypeID::insert(ir, ir::TypeKind::Struct { fields: field_tys });
                 struct_ty
             }
-            ir::OPKind::Constant(c) => {
-                match c {
-                    ir::ConstKind::I32(_) => prim.i32,
-                    ir::ConstKind::String(_) => prim.string,
-                    ir::ConstKind::IArray(_) => unimplemented!(),
-                }
+            ir::OPKind::Constant(c) => match c {
+                ir::ConstKind::I32(_) => prim.i32,
+                ir::ConstKind::String(_) => prim.string,
+                ir::ConstKind::IArray(_) => unimplemented!(),
             },
             _ => panic!("Unexpected op kind"),
         };
@@ -237,10 +228,9 @@ impl Query for VarTypeQuery {
     }
 }
 
-
 fn rewrite_var_types<'s>(ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<'s, ()> {
     let query = QueryAnalysis::new(ir);
-    
+
     let var_ids = ir.iter::<ir::VarID>().collect::<Vec<_>>();
     for id in var_ids.iter() {
         let ty = query.query(VarTypeQuery(*id)).unwrap();
@@ -284,7 +274,7 @@ struct RTSFnProto {
     ret_ty: ir::TypeKind,
 }
 
-lazy_static!(
+lazy_static! {
     static ref RTS_PRIMITIVES: Vec<RTSFnProto> = vec![
         RTSFnProto {
             name: "__rts_gc_init",
@@ -327,7 +317,7 @@ lazy_static!(
             ret_ty: ir::TypeKind::String,
         },
     ];
-);
+}
 
 #[derive(Clone)]
 pub struct RTSRegistry {
@@ -340,11 +330,23 @@ fn insert_rts_fns(ir: &mut ir::IR) {
         let ret_ty = ir::TypeID::insert(ir, proto.ret_ty.clone());
         let decl = ir::FuncDecl {
             name: ir::SymbolID::insert(ir, proto.name),
-            args: proto.arg_tys.iter().map(|ty| (ir::SymbolID::insert(ir, ""), ir::TypeID::insert(ir, ty.clone()))).collect(),
+            args: proto
+                .arg_tys
+                .iter()
+                .map(|ty| {
+                    (
+                        ir::SymbolID::insert(ir, ""),
+                        ir::TypeID::insert(ir, ty.clone()),
+                    )
+                })
+                .collect(),
             ret_ty,
         };
-        let id = ir.insert(ir::FuncImpl { 
-            decl, vars: vec![], body: vec![], builtin: true,
+        let id = ir.insert(ir::FuncImpl {
+            decl,
+            vars: vec![],
+            body: vec![],
+            builtin: true,
         });
         fns.insert(proto.name, id);
     }
@@ -356,7 +358,13 @@ pub struct TypeGCAttr {
     pub gc_pop_root: ir::FuncID,
 }
 
-fn add_gc_mark_root(ir: &ir::IR, rts_registry: &RTSRegistry, tyid: ir::TypeID, ops: &mut Vec<ir::OPID>, var: ir::VarID) {
+fn add_gc_mark_root(
+    ir: &ir::IR,
+    rts_registry: &RTSRegistry,
+    tyid: ir::TypeID,
+    ops: &mut Vec<ir::OPID>,
+    var: ir::VarID,
+) {
     let ty = ir.get(tyid);
     // match &ty.kind {
     //     ir::TypeKind::I32 => {}
@@ -371,9 +379,7 @@ fn add_gc_mark_root(ir: &ir::IR, rts_registry: &RTSRegistry, tyid: ir::TypeID, o
     // }
 }
 
-fn add_gc_ty_attrs(ir: &mut ir::IR) {
-
-}
+fn add_gc_ty_attrs(ir: &mut ir::IR) {}
 
 fn lower_to_rts(ir: &mut ir::IR) {
     let prim = ir.get_global::<PrimitiveRegistry>().unwrap().clone();
@@ -381,7 +387,9 @@ fn lower_to_rts(ir: &mut ir::IR) {
     let mut op_remap = HashMap::new();
     for fs in ir.iter::<ir::FuncID>() {
         let f = ir.get(fs);
-        if f.builtin { continue; }
+        if f.builtin {
+            continue;
+        }
         for op_id in &f.body {
             let op = ir.get(*op_id);
             match &op.kind {
@@ -390,7 +398,7 @@ fn lower_to_rts(ir: &mut ir::IR) {
                     if lty == prim.string {
                         let op_kind = ir::OPKind::Call {
                             func: rts.fns["__rts_string_concat"],
-                            args: vec![*lhs, *rhs]
+                            args: vec![*lhs, *rhs],
                         };
                         let op = ir::OP {
                             kind: op_kind,
@@ -463,7 +471,7 @@ mod test_type_infer {
             }
             fn main() {
                 foo({a: 1, b: 2}, 3);
-            }"
+            }",
         );
     }
 
@@ -516,10 +524,8 @@ mod test_type_infer {
                 print(c);
                 return (b + c);
             }
-            "
+            ",
         );
         println!("{}", ir::print_basic(&_ir));
-
     }
 }
-

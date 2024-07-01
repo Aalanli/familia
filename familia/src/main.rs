@@ -6,7 +6,6 @@ use familia_frontend as frontend;
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Cli {
-    
     #[arg(value_enum)]
     mode: Mode,
     /// The input file, ending in .fm

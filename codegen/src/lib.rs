@@ -80,12 +80,8 @@ fn generate_llvm_type<'ctx, 'ir>(
         ir::TypeKind::Void => {
             panic!("void type not allowed here");
         }
-        ir::TypeKind::String => {
-            code.context.ptr_type(AddressSpace::default()).into()
-        }
-        ir::TypeKind::Ptr => {
-            code.context.ptr_type(AddressSpace::default()).into()
-        }
+        ir::TypeKind::String => code.context.ptr_type(AddressSpace::default()).into(),
+        ir::TypeKind::Ptr => code.context.ptr_type(AddressSpace::default()).into(),
     };
     code.types.insert(ty_id, res);
     res
@@ -93,7 +89,8 @@ fn generate_llvm_type<'ctx, 'ir>(
 
 fn codegen_type_decls<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
     for ty_id in ir.ir.iter_stable::<ir::TypeDeclID>() {
-        code.context.opaque_struct_type(&ir.namer.name_type_decl(ty_id));
+        code.context
+            .opaque_struct_type(&ir.namer.name_type_decl(ty_id));
     }
 
     for ty_id in ir.ir.iter_stable::<ir::TypeDeclID>() {
@@ -136,7 +133,6 @@ fn codegen_fn<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
         }
         code.module
             .add_function(&ir.namer.name_func(func_id), fn_type, None);
-        
     }
 
     for func_id in ir.ir.iter::<ir::FuncID>() {
@@ -168,26 +164,36 @@ fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, op: i
     let op = ir.ir.get(op);
     match &op.kind {
         // every var corresponds to a stack pointer
-        ir::OPKind::Constant(c) => {
-            match c {
-                ir::ConstKind::I32(value) => {
-                    let const_val = code.context.i32_type().const_int(*value as u64, false);
-                    let var = code.new_stack_var(ir, op.res.unwrap());
-                    code.builder.build_store(var, const_val).unwrap();
-                }
-                ir::ConstKind::String(s) => {
-                    let str = s.get_str(&ir.ir);
-                    let str_val = code.builder.build_global_string_ptr(str, "str").unwrap();
-                    
-                    let res = code.new_stack_var(ir, op.res.unwrap());
-                    let rts_new_str = code.module.get_function("__rts_new_string").unwrap();
-                    let const_len = code.context.i32_type().const_int(str.as_bytes().len() as u64, false);
-                    let ptr = code.builder.build_call(rts_new_str, &[const_len.into(), str_val.as_pointer_value().into()], "").unwrap();
-                    code.builder.build_store(res, ptr.try_as_basic_value().left().unwrap()).unwrap();                
-                },
-                _ => unimplemented!("codegen for {:?}", c),
+        ir::OPKind::Constant(c) => match c {
+            ir::ConstKind::I32(value) => {
+                let const_val = code.context.i32_type().const_int(*value as u64, false);
+                let var = code.new_stack_var(ir, op.res.unwrap());
+                code.builder.build_store(var, const_val).unwrap();
             }
-        }
+            ir::ConstKind::String(s) => {
+                let str = s.get_str(&ir.ir);
+                let str_val = code.builder.build_global_string_ptr(str, "str").unwrap();
+
+                let res = code.new_stack_var(ir, op.res.unwrap());
+                let rts_new_str = code.module.get_function("__rts_new_string").unwrap();
+                let const_len = code
+                    .context
+                    .i32_type()
+                    .const_int(str.as_bytes().len() as u64, false);
+                let ptr = code
+                    .builder
+                    .build_call(
+                        rts_new_str,
+                        &[const_len.into(), str_val.as_pointer_value().into()],
+                        "",
+                    )
+                    .unwrap();
+                code.builder
+                    .build_store(res, ptr.try_as_basic_value().left().unwrap())
+                    .unwrap();
+            }
+            _ => unimplemented!("codegen for {:?}", c),
+        },
         ir::OPKind::Add { lhs, rhs } => {
             let lhs_llvm = code.load_var(ir, *lhs);
             let rhs_llvm = code.load_var(ir, *rhs);
@@ -221,13 +227,16 @@ fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, op: i
                     arg_val.into()
                 })
                 .collect::<Vec<_>>();
-            
+
             let res_val = code
-            .builder
-            .build_call(func, &args, "call")
-            .unwrap()
-            .try_as_basic_value();
-            if !(op.res.is_none() || op.res.unwrap().type_of(&ir.ir) == ir::TypeID::insert(&ir.ir, ir::TypeKind::Void)) {
+                .builder
+                .build_call(func, &args, "call")
+                .unwrap()
+                .try_as_basic_value();
+            if !(op.res.is_none()
+                || op.res.unwrap().type_of(&ir.ir)
+                    == ir::TypeID::insert(&ir.ir, ir::TypeKind::Void))
+            {
                 let res_ptr = code.new_stack_var(ir, op.res.unwrap());
                 if res_val.is_left() {
                     code.builder
@@ -362,7 +371,7 @@ pub fn generate_llvm(ir: &ir::IR, opt_level: OptLevel) -> Result<String> {
     Ok(codegen.module.to_string())
 }
 
-use inkwell::llvm_sys::core as core;
+use inkwell::llvm_sys::core;
 fn make_pointer_type<'a>(ty: BasicTypeEnum<'a>) -> PointerType<'a> {
     unsafe {
         let ptr_ty = core::LLVMPointerType(ty.as_type_ref(), 0);
@@ -470,19 +479,18 @@ mod tests {
 
         let ty = context.opaque_struct_type("footy");
         let ptr_ty = make_pointer_type(ty.into());
-        
+
         // let ty = context.ptr_type(AddressSpace::default());
-        
+
         let fn_ty = context.void_type().fn_type(&[ptr_ty.into()], false);
         module1.add_function("foo", fn_ty, Some(inkwell::module::Linkage::External));
 
-        let ty = context.struct_type(&[
-            context.i32_type().into(),
-            context.i32_type().into(),
-        ], false);
+        let ty = context.struct_type(
+            &[context.i32_type().into(), context.i32_type().into()],
+            false,
+        );
         let ptr_ty = make_pointer_type(ty.into());
         let fn_ty = context.void_type().fn_type(&[ptr_ty.into()], false);
-
 
         let func = module2.add_function("foo", fn_ty, Some(inkwell::module::Linkage::External));
         let entry = context.append_basic_block(func, "entry");
@@ -490,7 +498,9 @@ mod tests {
         builder.position_at_end(entry);
         let arg = func.get_first_param().unwrap();
         let a = context.i32_type().const_int(1, false);
-        let i1 = builder.build_struct_gep(ty, arg.into_pointer_value(), 0, "i1").unwrap();
+        let i1 = builder
+            .build_struct_gep(ty, arg.into_pointer_value(), 0, "i1")
+            .unwrap();
         builder.build_store(i1, a).unwrap();
 
         builder.build_return(None).unwrap();
@@ -501,7 +511,6 @@ mod tests {
         module1.link_in_module(module2).unwrap();
 
         println!("{}", module1.print_to_string().to_string());
-
     }
 
     #[test]
@@ -509,7 +518,9 @@ mod tests {
         let context = Context::create();
         let module = context.create_module("test");
         let builder = context.create_builder();
-        let print_ty = context.void_type().fn_type(&[context.ptr_type(AddressSpace::default()).into()], false);
+        let print_ty = context
+            .void_type()
+            .fn_type(&[context.ptr_type(AddressSpace::default()).into()], false);
         let foo_ty = context.void_type().fn_type(&[], false);
         module.add_function("print", print_ty, None);
         let foo = module.add_function("foo", foo_ty, None);
@@ -525,7 +536,6 @@ mod tests {
         // // let str_val = builder.build_load(str_ptr.get_value_type().into(), str_ptr.into(), "").unwrap();
 
         // builder.build_call(print, &[str_ptr.into()], "").unwrap();
-
 
         let str = builder.build_global_string_ptr("hello", "str").unwrap();
         let str_ptr = str.as_pointer_value();

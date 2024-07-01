@@ -1,7 +1,7 @@
 use std::any::{self, Any};
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::hash::Hash;
-use std::collections::{HashMap, HashSet};
 
 pub use super::registry::NodeID;
 use super::registry::{GenericUniqueRegistry, Registry};
@@ -60,11 +60,15 @@ impl IR {
     }
 
     pub fn get_global<T: 'static>(&self) -> Option<&T> {
-        self.globals.get(&std::any::TypeId::of::<T>()).and_then(|any| any.downcast_ref::<T>())
+        self.globals
+            .get(&std::any::TypeId::of::<T>())
+            .and_then(|any| any.downcast_ref::<T>())
     }
 
     pub fn get_global_mut<T: 'static>(&mut self) -> Option<&mut T> {
-        self.globals.get_mut(&std::any::TypeId::of::<T>()).and_then(|any| any.downcast_mut::<T>())
+        self.globals
+            .get_mut(&std::any::TypeId::of::<T>())
+            .and_then(|any| any.downcast_mut::<T>())
     }
 
     pub fn delete<I: ID>(&mut self, id: I) {
@@ -90,7 +94,6 @@ impl IR {
         let _ = I::CHECK;
         let any = self.get_any_mut(id.id()).unwrap();
         any.downcast_mut::<I::Node>().unwrap()
-        
     }
 
     pub fn insert<I: ID>(&self, node: I::Node) -> I {
@@ -126,21 +129,25 @@ impl IR {
 
     pub fn get_attribute<A: Attribute, I: ID>(&self, id: I) -> Option<&A> {
         let map = self.attributes.get(&id.id())?;
-        map.get(&any::TypeId::of::<A>())?.as_any().downcast_ref::<A>()
+        map.get(&any::TypeId::of::<A>())?
+            .as_any()
+            .downcast_ref::<A>()
     }
 
     pub fn iter<I: ID>(&self) -> impl Iterator<Item = I> {
         let mut ids = vec![];
         if I::IS_UNIQUE {
             self.unique_registry.for_each(|id| {
-                let node = self.unique_registry.get(id).unwrap().as_any().type_id() == std::any::TypeId::of::<I::Node>();
+                let node = self.unique_registry.get(id).unwrap().as_any().type_id()
+                    == std::any::TypeId::of::<I::Node>();
                 if node {
                     ids.push(I::new(id));
                 }
             });
         } else {
             self.registry.for_each(|id| {
-                let node = self.registry.get(id).unwrap().type_id() == std::any::TypeId::of::<I::Node>();
+                let node =
+                    self.registry.get(id).unwrap().type_id() == std::any::TypeId::of::<I::Node>();
                 if node {
                     ids.push(I::new(id));
                 }
@@ -155,7 +162,6 @@ impl IR {
         ids.into_iter()
     }
 }
-
 
 pub trait ID: Copy + Eq + Ord + Hash {
     type Node: Hash + Eq + 'static;
@@ -190,7 +196,6 @@ macro_rules! impl_id {
         }
     };
 }
-
 
 impl_id!(SymbolID, Symbol, true);
 
@@ -320,7 +325,7 @@ pub struct FuncImpl {
     pub decl: FuncDecl,
     pub vars: Vec<VarID>,
     pub body: Vec<OPID>,
-    pub builtin: bool
+    pub builtin: bool,
 }
 
 impl_id!(OPID, OP, false);
@@ -376,7 +381,6 @@ pub struct GlobalConst {
     pub value: ConstKind,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ClassDecl {
     pub name: SymbolID,
@@ -390,3 +394,15 @@ pub struct ClassImpl {
     pub decl: ClassDecl,
     pub methods: Vec<FuncID>,
 }
+
+impl_id!(ModuleID, Module, false);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Module {
+    pub funcs: Vec<FuncID>,
+    pub types: Vec<TypeDeclID>,
+    pub global_consts: Vec<GlobalConstID>,
+    pub classes: Vec<ClassID>,
+    pub main: Option<FuncID>,
+}
+

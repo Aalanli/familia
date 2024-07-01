@@ -2,7 +2,6 @@ use super::ast;
 
 pub type PResult<T> = Result<T, ProgramError>;
 
-
 #[derive(Debug, Clone)]
 pub enum ErrorType {
     InternalError,
@@ -43,4 +42,3 @@ impl Default for ProgramError {
 }
 
 pub const UNBOUND_SYMBOL: &str = "Unbound symbol";
-

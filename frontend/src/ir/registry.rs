@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use std::cell::RefCell;
 use std::hash::Hash;
 use std::rc::Rc;
@@ -59,7 +61,10 @@ impl<T: ?Sized> Registry<T> {
     }
 
     pub fn for_each(&self, mut f: impl FnMut(NodeID)) {
-        self.data.borrow().keys().for_each(|id| f(NodeID { id: *id }));
+        self.data
+            .borrow()
+            .keys()
+            .for_each(|id| f(NodeID { id: *id }));
     }
 }
 
@@ -180,7 +185,10 @@ impl GenericUniqueRegistry {
     }
 
     pub fn for_each(&self, mut f: impl FnMut(NodeID)) {
-        self.data.borrow().keys().for_each(|id| f(NodeID { id: *id }));
+        self.data
+            .borrow()
+            .keys()
+            .for_each(|id| f(NodeID { id: *id }));
     }
 }
 #[cfg(test)]

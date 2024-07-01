@@ -4,12 +4,11 @@ use std::hash::Hash;
 
 use lazy_static::lazy_static;
 
+use crate::ast;
+use crate::ir;
 use crate::prelude::*;
-use crate::ast as ast;
 use ast::Decl;
 use ast::Visitor;
-use crate::ir as ir;
-
 
 #[derive(Debug, Clone)]
 struct PointerHashKey<'a, K> {
@@ -51,15 +50,14 @@ impl<'a, K, V> PointerHashMap<'a, K, V> {
     }
 }
 
-
-lazy_static!(
+lazy_static! {
     static ref BUILTIN_TYPES: HashMap<&'static str, ir::TypeKind> = {
         let mut m = HashMap::new();
         m.insert("i32", ir::TypeKind::I32);
         m.insert("String", ir::TypeKind::String);
         m
     };
-);
+}
 
 struct BuiltinFnProto {
     name: &'static str,
@@ -67,23 +65,28 @@ struct BuiltinFnProto {
     ret_ty: ir::TypeKind,
 }
 
-lazy_static!(
+lazy_static! {
     static ref BUILTIN_FNS: HashMap<&'static str, BuiltinFnProto> = {
         let mut m = HashMap::new();
-        m.insert("print", BuiltinFnProto { 
-            name: "print", 
-            args: vec![ir::TypeKind::String], 
-            ret_ty: ir::TypeKind::Void
-        });
-        m.insert("to_str", BuiltinFnProto { 
-            name: "to_str", 
-            args: vec![ir::TypeKind::I32], 
-            ret_ty: ir::TypeKind::String
-        });
+        m.insert(
+            "print",
+            BuiltinFnProto {
+                name: "print",
+                args: vec![ir::TypeKind::String],
+                ret_ty: ir::TypeKind::Void,
+            },
+        );
+        m.insert(
+            "to_str",
+            BuiltinFnProto {
+                name: "to_str",
+                args: vec![ir::TypeKind::I32],
+                ret_ty: ir::TypeKind::String,
+            },
+        );
         m
     };
-
-);
+}
 
 fn get_builtin_type(path: &ast::Path) -> PResult<ir::TypeKind> {
     if path.len() == 1 {
@@ -93,7 +96,11 @@ fn get_builtin_type(path: &ast::Path) -> PResult<ir::TypeKind> {
         }
     }
 
-    Err(ProgramError { error_message: "unbound type name", span: Some(path.span), ..Default::default() })
+    Err(ProgramError {
+        error_message: "unbound type name",
+        span: Some(path.span),
+        ..Default::default()
+    })
 }
 
 fn is_builtin_fn(path: &ast::Path) -> bool {
@@ -110,7 +117,12 @@ fn check_duplicate_name<'a>(src: &'a ModSource, ast: &Decl) -> PhaseResult<'a, (
     fn check_duplicate_name_helper<'a>(src: &'a ModSource, ast: &Decl) {
         let mut names = HashSet::new();
         match &ast.kind {
-            ast::DeclKind::Module { name, file, top, decls } => {
+            ast::DeclKind::Module {
+                name,
+                file,
+                top,
+                decls,
+            } => {
                 for subdecl in decls {
                     let name = subdecl.name();
                     if names.contains(name) {
@@ -142,7 +154,6 @@ fn check_duplicate_name<'a>(src: &'a ModSource, ast: &Decl) -> PhaseResult<'a, (
             }
             _ => {}
         }
-
     }
     check_duplicate_name_helper(src, ast);
     src.commit_error(())
@@ -167,7 +178,11 @@ fn check_basic<'a>(src: &'a ModSource, ast: &Decl) -> PhaseResult<'a, ()> {
             }
         }
     } else {
-        src.add_err(ProgramError { error_message: "expected a module", error_type: err::InternalError ,..Default::default() });
+        src.add_err(ProgramError {
+            error_message: "expected a module",
+            error_type: err::InternalError,
+            ..Default::default()
+        });
     }
     src.commit_error(())
 }
@@ -184,11 +199,7 @@ impl<'a> ast::Visitor<'a> for GetPath<'a> {
     }
 }
 
-fn find_path<'a>(
-    ast: &'a ast::Decl,
-    path: &'a ast::Path,
-    pindex: usize,
-) -> PResult<&'a ast::Decl> {
+fn find_path<'a>(ast: &'a ast::Decl, path: &'a ast::Path, pindex: usize) -> PResult<&'a ast::Decl> {
     match &ast.kind {
         ast::DeclKind::Module { decls, .. } => {
             for sub_decl in decls.iter() {
@@ -234,7 +245,11 @@ fn find_path<'a>(
         }
     }
 
-    Err(ProgramError { error_message: "unbound path", span: Some(ast.span), ..Default::default() })
+    Err(ProgramError {
+        error_message: "unbound path",
+        span: Some(ast.span),
+        ..Default::default()
+    })
 }
 
 // every path must be fully qualified for now
@@ -315,7 +330,6 @@ pub struct PrimitiveRegistry {
     pub void: ir::TypeID,
     pub print: ir::FuncID,
     pub to_str: ir::FuncID,
-
 }
 
 struct ASTToIR<'a> {
@@ -329,7 +343,11 @@ struct ASTToIR<'a> {
 }
 
 impl<'a> ASTToIR<'a> {
-    fn recursively_construct_types(&self, ty: &ast::Type, ir: &mut ir::IR) -> PResult<ir::TypeKind> {
+    fn recursively_construct_types(
+        &self,
+        ty: &ast::Type,
+        ir: &mut ir::IR,
+    ) -> PResult<ir::TypeKind> {
         let ty_kind;
         match &ty.kind {
             ast::TypeKind::Void => {
@@ -353,7 +371,6 @@ impl<'a> ASTToIR<'a> {
                 ty_kind = ir::TypeKind::Struct { fields: field_ids };
             }
             ast::TypeKind::Symbol(path) => {
-
                 if let Some(decl) = self.path_map.get(path) {
                     let id = self.ty_decl_to_ty_id.get(*decl).unwrap();
                     ty_kind = ir::TypeKind::Rec { id: *id };
@@ -373,7 +390,16 @@ impl<'a> ASTToIR<'a> {
             let proto = BUILTIN_FNS.get(name).unwrap();
             let fdecl = ir::FuncDecl {
                 name: ir::SymbolID::insert(ir, proto.name),
-                args: proto.args.iter().map(|ty| (ir::SymbolID::insert(ir, ""), ir::TypeID::insert(ir, ty.clone()))).collect(),
+                args: proto
+                    .args
+                    .iter()
+                    .map(|ty| {
+                        (
+                            ir::SymbolID::insert(ir, ""),
+                            ir::TypeID::insert(ir, ty.clone()),
+                        )
+                    })
+                    .collect(),
                 ret_ty: ir::TypeID::insert(ir, proto.ret_ty.clone()),
             };
             let fimpl = ir::FuncImpl {
@@ -394,10 +420,13 @@ impl<'a> ASTToIR<'a> {
             print: build_proto("print"),
             to_str: build_proto("to_str"),
         }
-
     }
 
-    fn insert_type_decls<'s>(&mut self, ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<'s, ()> {
+    fn insert_type_decls<'s>(
+        &mut self,
+        ir: &mut ir::IR,
+        src: &'s ModSource,
+    ) -> PhaseResult<'s, ()> {
         let mut visitor = CollectTypeDecl { decls: Vec::new() };
         visitor.visit_decl(&self.ast);
         for decl in visitor.decls.iter() {
@@ -419,7 +448,7 @@ impl<'a> ASTToIR<'a> {
                 continue;
             }
             let tkind = tkind.unwrap();
-            ir.insert_with(tid, ir::Type{ kind: tkind });
+            ir.insert_with(tid, ir::Type { kind: tkind });
             ir.insert_with(
                 id,
                 ir::TypeDecl {
@@ -438,7 +467,11 @@ impl<'a> ASTToIR<'a> {
     }
 
     fn make_var(&mut self, var: &ast::Var, ir: &mut ir::IR) -> PResult<ir::VarID> {
-        let ty = var.ty.as_ref().map(|ty| self.get_type(ty, ir)).transpose()?;
+        let ty = var
+            .ty
+            .as_ref()
+            .map(|ty| self.get_type(ty, ir))
+            .transpose()?;
         let id = ir.temporary_id();
         let var = ir::Var {
             id,
@@ -484,7 +517,9 @@ impl<'a> ASTToIR<'a> {
                 ir.insert_with(
                     id,
                     ir::OP {
-                        kind: ir::OPKind::Constant(ir::ConstKind::String(ir::SymbolID::insert(ir, s))),
+                        kind: ir::OPKind::Constant(ir::ConstKind::String(ir::SymbolID::insert(
+                            ir, s,
+                        ))),
                         span: expr.span,
                         res: Some(var),
                     },
@@ -517,12 +552,14 @@ impl<'a> ASTToIR<'a> {
                     .map(|expr: &ast::Expr| self.insert_expr(var_map, ops, expr, parent_name, ir))
                     .collect();
 
-                let func_id = *self.path_map.get(path).map(|decl| {
-                    self.fn_impl_to_id.get(*decl).unwrap()
-                }).unwrap_or_else(|| {
-                    assert!(is_builtin_fn(path));
-                    self.builtins_fn_map.get(path.path[0].name.view()).unwrap()
-                });
+                let func_id = *self
+                    .path_map
+                    .get(path)
+                    .map(|decl| self.fn_impl_to_id.get(*decl).unwrap())
+                    .unwrap_or_else(|| {
+                        assert!(is_builtin_fn(path));
+                        self.builtins_fn_map.get(path.path[0].name.view()).unwrap()
+                    });
                 let func_ret = ir.get(func_id).decl.ret_ty;
                 let var = ir::VarID::new_var(ir, parent_name, None, Some(expr.span));
                 let id = ir.temporary_id();
@@ -743,7 +780,6 @@ impl<'a> ASTToIR<'a> {
     }
 }
 
-
 pub fn ast_to_ir<'s, 'a>(src: &'s ModSource, ast: &'a Decl) -> PhaseResult<'s, ir::IR> {
     check_basic(src, ast)?;
     let path_map = check_path(src, ast)?;
@@ -760,7 +796,6 @@ pub fn ast_to_ir<'s, 'a>(src: &'s ModSource, ast: &'a Decl) -> PhaseResult<'s, i
     ast_to_ir.lower_ir(&mut ir, src)?;
     Ok(ir)
 }
-
 
 #[cfg(test)]
 mod ast_to_ir_test {
@@ -780,7 +815,8 @@ mod ast_to_ir_test {
                 A::foo(1);
                 A::B::bar(2);
             }
-            ".into();
+            "
+        .into();
         let ast = parse(&src).unwrap();
 
         let _t = check_path(&src, &ast).unwrap();
@@ -791,8 +827,7 @@ mod ast_to_ir_test {
 
     #[test]
     fn test_ast_to_ir() {
-        let src =
-        "\
+        let src = "\
         type T = {a: i32, b: i32}
         type R = {a: T, b: T}
         class A {
@@ -801,10 +836,9 @@ mod ast_to_ir_test {
         fn main() {
             A::foo({a: 1, b: 2});
         }
-        ".into();
-        let ast = parse(&src
-        )
-        .unwrap();
+        "
+        .into();
+        let ast = parse(&src).unwrap();
         // println!("{:?}", ast);
 
         let _ir = ast_to_ir(&src, &ast).unwrap();
@@ -817,7 +851,8 @@ mod ast_to_ir_test {
         fn main() {
             print(to_str(1));
         }
-        ".into();
+        "
+        .into();
         let ast = parse(&src).unwrap();
         let _ir = ast_to_ir(&src, &ast).unwrap();
         println!("{}", ir::print_basic(&_ir));

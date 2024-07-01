@@ -97,9 +97,27 @@ pub enum Tok {
 
 #[derive(Debug)]
 pub enum LexError {
-    UnrecognizedToken(String),
-    ParseIntError(String),
-    ParseStringError(String),
+    UnrecognizedToken(String, Span),
+    ParseIntError(String, Span),
+    ParseStringError(String, Span),
+}
+
+impl LexError {
+    pub fn get_span(&self) -> &Span {
+        match self {
+            LexError::UnrecognizedToken(_, span) => span,
+            LexError::ParseIntError(_, span) => span,
+            LexError::ParseStringError(_, span) => span,
+        }
+    }
+
+    pub fn get_message(&self) -> &str {
+        match self {
+            LexError::UnrecognizedToken(s, _) => s,
+            LexError::ParseIntError(s, _) => s,
+            LexError::ParseStringError(s, _) => s,
+        }
+    }
 }
 
 type Lex = Result<(Loc, Tok, Loc), LexError>;
@@ -120,8 +138,8 @@ impl<T: Iterator<Item = char>> Lexer<T> {
             window: None,
             buf: VecDeque::new(),
             global_pos: 0,
-            line_num: 0,
-            line_pos: 0,
+            line_num: 1,
+            line_pos: 1,
         }
     }
 
@@ -165,7 +183,7 @@ impl<T: Iterator<Item = char>> Lexer<T> {
             }
             if c == '\n' {
                 self.line_num += 1;
-                self.line_pos = 0;
+                self.line_pos = 1;
             } else {
                 self.line_pos += 1;
             }
@@ -279,23 +297,30 @@ impl<T: Iterator<Item = char>> Lexer<T> {
                         if let Some('"') = self.peek_char() {
                             self.fill_buf_by(1);
                             continue;
-                        } 
+                        }
                         if let Some('\\') = self.peek_char() {
                             self.fill_buf_by(1);
                             continue;
-                        } 
+                        }
                         if let Some('n') = self.peek_char() {
                             self.fill_buf_by(1);
                             self.clear_buf_by(1);
                             s.push('\n');
                             continue;
                         }
-
-                        return Some(Err(LexError::ParseStringError(format!("Invalid escape sequence"))));
+                        let span = lpos.span(self.get_loc());
+                        return Some(Err(LexError::ParseStringError(
+                            format!("Invalid escape sequence"),
+                            span,
+                        )));
                     }
 
                     if self.peek_char().is_none() {
-                        return Some(Err(LexError::ParseStringError("Unterminated string".to_string())));
+                        let span = lpos.span(self.get_loc());
+                        return Some(Err(LexError::ParseStringError(
+                            "Unterminated string".to_string(),
+                            span,
+                        )));
                     }
                 }
                 return Some(Ok((lpos, Tok::String(s), self.get_loc())));
@@ -365,12 +390,13 @@ impl<T: Iterator<Item = char>> Lexer<T> {
                 return Some(Ok((lpos, Tok::Return, rpos)));
             } else if self.buf.iter().all(|x| x.is_numeric()) {
                 // todo: should change to regex
+                let span = lpos.span(self.get_loc());
                 let num = self
                     .buf
                     .iter()
                     .collect::<String>()
                     .parse()
-                    .map_err(|x| LexError::ParseIntError(format!("{x}")));
+                    .map_err(|x| LexError::ParseIntError(format!("{x}"), span));
                 self.clear_buf(|_| true);
                 if let Err(e) = num {
                     return Some(Err(e));
@@ -390,8 +416,12 @@ impl<T: Iterator<Item = char>> Lexer<T> {
                     self.get_loc(),
                 )));
             }
-
-            let res = Some(Err(LexError::UnrecognizedToken(self.buf.iter().collect())));
+            self.clear_buf(|_| true);
+            let span = lpos.span(self.get_loc());
+            let res = Some(Err(LexError::UnrecognizedToken(
+                format!("Unrecognized token"),
+                span,
+            )));
             self.clear_buf(|_| true);
             return res;
         }
@@ -408,6 +438,8 @@ impl<T: Iterator<Item = char>> Iterator for Lexer<T> {
 
 #[cfg(test)]
 mod test_lex {
+    #![allow(unused_variables)]
+
     use super::*;
     #[test]
     fn test_lex1() {
@@ -491,7 +523,7 @@ mod test_lex {
         let input = "\"test";
         let mut lexer = Lexer::new(input.chars());
         let res = lexer.next().unwrap();
-        assert!(matches!(res, Err(LexError::ParseStringError(_))));
+        assert!(matches!(res, Err(LexError::ParseStringError(_, _))));
 
         let input = "\"test\\\\\"";
         let mut lexer = Lexer::new(input.chars());
@@ -506,7 +538,7 @@ mod test_lex {
         let input = "\"test\\\\\\ \"";
         let mut lexer = Lexer::new(input.chars());
         let res = lexer.next().unwrap();
-        assert!(matches!(res, Err(LexError::ParseStringError(_))));
+        assert!(matches!(res, Err(LexError::ParseStringError(_, _))));
 
         let input = "\"🥲\"";
         let mut lexer = Lexer::new(input.chars());
@@ -519,7 +551,8 @@ mod test_lex {
         let input = "fn main() { to_str(1, 2); }";
         let lexer = Lexer::new(input.chars());
         for i in lexer {
-            println!("{:?}", i);
+            // println!("{:?}", i);
+            i.unwrap();
         }
     }
 }
