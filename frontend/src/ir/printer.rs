@@ -48,7 +48,7 @@ impl IRNamer {
                 })
                 .collect::<HashMap<_, _>>(),
             class_prefix_ids: Self::compute_id_name(ir, |id: ClassID| {
-                ir.get(id).decl.name.get_str(ir).into()
+                ir.get(id).name.get_str(ir).into()
             }),
             var_prefix: Self::compute_id_name(ir, |id: VarID| ir.get(id).name.get_str(ir).into()),
             global_prefix: Self::compute_id_name(ir, |id: GlobalConstID| {
@@ -144,8 +144,11 @@ impl<'ir> BasicPrinter<'ir> {
                     }),
                 );
             }
-            TypeKind::Rec { id: decl } => {
-                return format!("@{}", self.ir_namer.try_name_type(*decl).unwrap_or("rec"));
+            TypeKind::This => {
+                return format!("This");
+            }
+            TypeKind::Self_ => {
+                return format!("Self");
             }
             TypeKind::Ptr => {
                 return format!("@ptr");

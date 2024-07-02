@@ -247,14 +247,12 @@ impl VarID {
         span: Option<Span>,
     ) -> VarID {
         let name = name.unwrap_or_else(|| SymbolID::insert(ir, ""));
-        let id = ir.temporary_id();
-        ir.insert(Var { id, name, ty, span })
+        ir.insert(Var { name, ty, span })
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Var {
-    pub id: VarID,
     pub name: SymbolID,
     pub ty: Option<TypeID>,
     pub span: Option<Span>,
@@ -300,8 +298,9 @@ pub enum TypeKind {
     I32,
     Void,
     String,
+    This,
+    Self_,
     Struct { fields: Vec<(SymbolID, TypeID)> },
-    Rec { id: TypeID },
     Ptr,
 }
 
@@ -314,6 +313,7 @@ impl Default for TypeKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FuncDecl {
     pub name: SymbolID,
+    pub span: Span,
     pub args: Vec<(SymbolID, TypeID)>,
     pub ret_ty: TypeID,
 }
@@ -381,28 +381,37 @@ pub struct GlobalConst {
     pub value: ConstKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ClassDecl {
-    pub name: SymbolID,
-    pub repr_ty: TypeID,
-}
+
 
 impl_id!(ClassID, ClassImpl, false);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ClassImpl {
-    pub decl: ClassDecl,
+    pub name: SymbolID,
     pub methods: Vec<FuncID>,
+    pub types: Vec<TypeDeclID>,
+    pub for_itf: Option<InterfaceID>,
 }
+
+impl_id!(InterfaceID, InterfaceImpl, false);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InterfaceImpl {
+    pub name: SymbolID,
+    pub methods: Vec<FuncDecl>,
+}
+
 
 impl_id!(ModuleID, Module, false);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Module {
     pub funcs: Vec<FuncID>,
     pub types: Vec<TypeDeclID>,
     pub global_consts: Vec<GlobalConstID>,
     pub classes: Vec<ClassID>,
+    pub interfaces: Vec<InterfaceID>,
     pub main: Option<FuncID>,
+    pub src: Option<crate::ModSource>,
 }
 

@@ -2,7 +2,7 @@ use super::ast;
 
 pub type PResult<T> = Result<T, ProgramError>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ErrorType {
     InternalError,
     Error,
@@ -11,7 +11,7 @@ pub enum ErrorType {
 
 pub use ErrorType::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProgramError {
     pub error_type: ErrorType,
     pub error_message: &'static str,

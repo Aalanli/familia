@@ -1,3 +1,20 @@
+pub mod utils;
+mod ast_to_ir;
+
+pub use ast_to_ir::ast_to_ir;
+
+#[derive(Clone)]
+#[allow(non_snake_case)]
+pub struct PrimitiveRegistry {
+    pub i32: ir::TypeID,
+    pub string: ir::TypeID,
+    pub void: ir::TypeID,
+    pub This: ir::TypeID,
+    pub Self_: ir::TypeID,
+    pub fns: HashMap<String, ir::FuncID>
+}
+
+
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
@@ -46,61 +63,6 @@ impl Query for VarParentAnalysis {
 
     fn query(&self, q: &QueryAnalysis) -> Self::Result {
         Rc::new(VarParent::new(q.ir()))
-    }
-}
-
-#[derive(Clone, Hash, PartialEq, Eq)]
-struct ContainsCycleQuery(ir::TypeID);
-
-impl Query for ContainsCycleQuery {
-    type Result = bool;
-
-    fn query(&self, q: &QueryAnalysis) -> Self::Result {
-        let ir = q.ir();
-        let ty = ir.get(self.0);
-        match &ty.kind {
-            ir::TypeKind::I32 => false,
-            ir::TypeKind::Void => false,
-            ir::TypeKind::String => false,
-            ir::TypeKind::Ptr { .. } => false,
-            ir::TypeKind::Struct { fields } => {
-                for (_, field_ty) in fields {
-                    match q.query(ContainsCycleQuery(*field_ty)) {
-                        Ok(true) => return true,
-                        Ok(false) => {}
-                        Err(QueryCycle) => return true,
-                    }
-                }
-                false
-            }
-            ir::TypeKind::Rec { id } => q.query(ContainsCycleQuery(*id)).map_or(true, |x| x),
-        }
-    }
-}
-
-#[derive(Clone, Hash, PartialEq, Eq)]
-struct InlinedTypeQuery(ir::TypeID);
-
-impl Query for InlinedTypeQuery {
-    type Result = ir::TypeID;
-
-    fn query(&self, q: &QueryAnalysis) -> Self::Result {
-        let ir = q.ir();
-        let ty = ir.get(self.0);
-        match &ty.kind {
-            ir::TypeKind::I32 => self.0,
-            ir::TypeKind::Void => self.0,
-            ir::TypeKind::String => self.0,
-            ir::TypeKind::Ptr { .. } => self.0,
-            ir::TypeKind::Struct { fields } => {
-                let field_tys = fields
-                    .iter()
-                    .map(|(s, ty)| (*s, q.query(InlinedTypeQuery(*ty)).unwrap()))
-                    .collect();
-                ir::TypeID::insert(ir, ir::TypeKind::Struct { fields: field_tys })
-            }
-            ir::TypeKind::Rec { id } => q.query(InlinedTypeQuery(*id)).unwrap(),
-        }
     }
 }
 
@@ -178,9 +140,6 @@ impl Query for VarTypeQuery {
                 let ty = q.query(VarTypeQuery(*obj)).unwrap()?;
                 let mut struct_ty = ir.get(ty);
                 // assume no cycle
-                while let ir::TypeKind::Rec { id } = &struct_ty.kind {
-                    struct_ty = ir.get(*id);
-                }
 
                 if let ir::TypeKind::Struct { fields } = &struct_ty.kind {
                     let idx = fields.iter().position(|(name, _)| *name == *attr).unwrap();
@@ -228,7 +187,7 @@ impl Query for VarTypeQuery {
     }
 }
 
-fn rewrite_var_types<'s>(ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<'s, ()> {
+fn rewrite_var_types<'s>(ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<()> {
     let query = QueryAnalysis::new(ir);
 
     let var_ids = ir.iter::<ir::VarID>().collect::<Vec<_>>();
@@ -261,7 +220,7 @@ fn rewrite_var_types<'s>(ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<'s,
     Ok(())
 }
 
-pub fn transform_ir<'s>(ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<'s, ()> {
+pub fn transform_ir<'s>(ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<()> {
     rewrite_var_types(ir, src)?;
     insert_rts_fns(ir);
     lower_to_rts(ir);
@@ -330,6 +289,7 @@ fn insert_rts_fns(ir: &mut ir::IR) {
         let ret_ty = ir::TypeID::insert(ir, proto.ret_ty.clone());
         let decl = ir::FuncDecl {
             name: ir::SymbolID::insert(ir, proto.name),
+            span: Span::default(),
             args: proto
                 .arg_tys
                 .iter()
@@ -409,7 +369,7 @@ fn lower_to_rts(ir: &mut ir::IR) {
                     }
                 }
                 ir::OPKind::Call { func, args } => {
-                    if *func == prim.print {
+                    if *func == prim.fns["print"] {
                         assert!(args.len() == 1 && ir.get(args[0]).ty.unwrap() == prim.string);
                         let op_kind = ir::OPKind::Call {
                             func: rts.fns["__rts_string_print"],
@@ -421,7 +381,7 @@ fn lower_to_rts(ir: &mut ir::IR) {
                             res: op.res,
                         };
                         op_remap.insert(*op_id, op);
-                    } else if *func == prim.to_str {
+                    } else if *func == prim.fns["to_str"] {
                         assert!(args.len() == 1 && ir.get(args[0]).ty.unwrap() == prim.i32);
                         let op_kind = ir::OPKind::Call {
                             func: rts.fns["__rts_int_to_string"],
@@ -445,8 +405,8 @@ fn lower_to_rts(ir: &mut ir::IR) {
             *old_op = new_op;
         }
     }
-    ir.delete(prim.print);
-    ir.delete(prim.to_str);
+    ir.delete(prim.fns["print"]);
+    ir.delete(prim.fns["to_str"]);
 }
 
 #[cfg(test)]
@@ -456,7 +416,7 @@ mod test_type_infer {
     fn generate_ir_from_str(s: &str) -> ir::IR {
         let src = s.into();
         let ast = crate::parse(&src).unwrap();
-        let mut ir = crate::ast_to_ir(&src, &ast).unwrap();
+        let mut ir = crate::ast_to_ir(src, ast).unwrap();
         transform_ir(&mut ir, &src).unwrap();
         ir
     }

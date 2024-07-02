@@ -25,8 +25,26 @@ pub enum TypeKind {
     Void,
     I32,
     String,
+    This,
+    Self_,
     Struct { fields: Vec<Var> },
     Symbol(Path),
+}
+
+impl TypeKind {
+    pub fn ref_paths(&self) -> Vec<&Path> {
+        match self {
+            TypeKind::Void => vec![],
+            TypeKind::I32 => vec![],
+            TypeKind::String => vec![],
+            TypeKind::This => vec![],
+            TypeKind::Self_ => vec![],
+            TypeKind::Struct { fields } => 
+                fields.iter().map(|f| f.ty.as_ref().unwrap().kind.ref_paths()).flatten().collect(),
+            TypeKind::Symbol(path) => vec![path],
+        
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -54,7 +72,12 @@ pub enum DeclKind {
     },
     ClassImpl {
         name: Ident,
+        for_it: Option<Path>,
         sub_decls: Vec<Decl>,
+    },
+    InterfaceImpl {
+        name: Ident,
+        body: Vec<Decl>,
     },
     Module {
         name: Ident,
@@ -64,6 +87,32 @@ pub enum DeclKind {
     },
 }
 
+impl DeclKind {
+    pub fn is_type_decl(&self) -> bool {
+        matches!(self, DeclKind::TypeDecl { .. })
+    }
+
+    pub fn is_fn_decl(&self) -> bool {
+        matches!(self, DeclKind::FnDecl { .. })
+    }
+
+    pub fn is_fn_impl(&self) -> bool {
+        matches!(self, DeclKind::FnImpl { .. })
+    }
+
+    pub fn is_class_impl(&self) -> bool {
+        matches!(self, DeclKind::ClassImpl { .. })
+    }
+
+    pub fn is_interface_impl(&self) -> bool {
+        matches!(self, DeclKind::InterfaceImpl { .. })
+    }
+
+    pub fn is_module(&self) -> bool {
+        matches!(self, DeclKind::Module { .. })
+    }
+}
+
 impl Decl {
     pub fn name(&self) -> &Ident {
         match &self.kind {
@@ -71,7 +120,19 @@ impl Decl {
             DeclKind::FnDecl { name, .. } => name,
             DeclKind::FnImpl { name, .. } => name,
             DeclKind::ClassImpl { name, .. } => name,
+            DeclKind::InterfaceImpl { name, .. } => name,
             DeclKind::Module { name, .. } => name,
+        }
+    }
+
+    pub fn sub_decls(&self) -> Vec<&Decl> {
+        match &self.kind {
+            DeclKind::TypeDecl { .. } => vec![],
+            DeclKind::FnDecl { .. } => vec![],
+            DeclKind::FnImpl { .. } => vec![],
+            DeclKind::ClassImpl { sub_decls, .. } => sub_decls.iter().collect(),
+            DeclKind::InterfaceImpl { body, .. } => body.iter().collect(),
+            DeclKind::Module { decls, .. } => decls.iter().collect(),
         }
     }
 }
@@ -112,6 +173,7 @@ pub struct Path {
     pub path: Vec<Ident>,
     pub span: Span,
 }
+
 
 impl Path {
     pub fn len(&self) -> usize {
@@ -180,6 +242,11 @@ pub fn default_visit_decl<'a>(decl: &'a Decl, visitor: &mut impl Visitor<'a>) {
                 visitor.visit_decl(sub_decl);
             }
         }
+        DeclKind::InterfaceImpl { body, .. } => {
+            for sub_decl in body {
+                visitor.visit_decl(sub_decl);
+            }
+        }
         DeclKind::Module { decls, .. } => {
             for decl in decls {
                 visitor.visit_decl(decl);
@@ -193,6 +260,8 @@ pub fn default_visit_type<'a>(ty: &'a Type, visitor: &mut impl Visitor<'a>) {
         TypeKind::Void => {}
         TypeKind::I32 => {}
         TypeKind::String => {}
+        TypeKind::This => {}
+        TypeKind::Self_ => {}
         TypeKind::Struct { fields } => {
             for field in fields {
                 visitor.visit_var(field);

@@ -1,5 +1,4 @@
 pub mod ast;
-mod ast_to_ir;
 pub mod error;
 pub mod ir;
 mod parser;
@@ -7,39 +6,62 @@ pub mod prelude;
 pub mod query;
 pub mod transforms;
 
-use std::{cell::RefCell, fmt::Display};
+use std::{cell::RefCell, collections::HashSet, fmt::Display, hash::Hash, rc::Rc};
 
-pub use ast_to_ir::ast_to_ir;
 pub use parser::parse;
-pub use transforms::transform_ir;
+pub use transforms::{transform_ir, ast_to_ir};
 
-pub type PhaseResult<'a, T> = Result<T, &'a ModSource>;
+pub type PhaseResult<T> = Result<T, PhaseError>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModSource {
-    pub text: String,
-    file: Option<String>,
+    text: Rc<String>,
+    file: Option<Rc<String>>,
     errors: RefCell<Vec<error::ProgramError>>,
+    inserted_errors: RefCell<HashSet<error::ProgramError>>,
+}
+
+impl Hash for ModSource {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.text.hash(state);
+        self.file.hash(state);
+    }
 }
 
 impl ModSource {
     pub fn new(file: Option<String>, text: String) -> Self {
         ModSource {
-            file,
-            text,
+            file: file.map(Rc::new),
+            text: Rc::new(text),
             errors: RefCell::new(Vec::new()),
+            inserted_errors: RefCell::new(HashSet::new()),
         }
     }
 
     pub fn add_err(&self, err: error::ProgramError) {
+        if self.inserted_errors.borrow().contains(&err) {
+            return;
+        }
+        self.inserted_errors.borrow_mut().insert(err.clone());
         self.errors.borrow_mut().push(err);
+    }
+
+    pub fn err(&self) -> PhaseError {
+        let mut new_errors = vec![];
+        std::mem::swap(&mut new_errors, &mut *self.errors.borrow_mut());
+        self.inserted_errors.borrow_mut().clear();
+        PhaseError {
+            text: self.text.clone(),
+            file: self.file.clone(),
+            errors: new_errors,
+        }
     }
 
     pub fn commit_error<T>(&self, t: T) -> PhaseResult<T> {
         if self.errors.borrow().is_empty() {
             Ok(t)
         } else {
-            Err(self)
+            Err(self.err())
         }
     }
 }
@@ -50,11 +72,18 @@ impl From<&str> for ModSource {
     }
 }
 
+#[derive(Debug)]
+pub struct PhaseError {
+    text: Rc<String>,
+    file: Option<Rc<String>>,
+    errors: Vec<error::ProgramError>,
+}
+
 use colored::Colorize;
-impl Display for ModSource {
+impl Display for PhaseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let lines = self.text.lines().collect::<Vec<_>>();
-        for err in self.errors.borrow().iter() {
+        for err in self.errors.iter() {
             match err.error_type {
                 error::Error => write!(f, "{} : {}", "Error".red().bold(), err.error_message.red())?,
                 error::Warning => write!(f, "{} : {}", "Warning".yellow().bold(), err.error_message.yellow())?,

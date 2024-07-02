@@ -40,14 +40,16 @@ DeclKind : DeclKind = {
         };
         kind
     },
-    "class" <name:Ident> "{" <sub_decls:Decl*> "}" => {
-        DeclKind::ClassImpl { name, sub_decls }
+    "class" <name:Ident> <for_it:("for" <Path>)?> "{" <sub_decls:Decl*> "}" => {
+        DeclKind::ClassImpl { name, sub_decls, for_it }
+    },
+    "interface" <name:Ident> "{" <sub_decls:Decl*> "}" => {
+        DeclKind::InterfaceImpl { name, sub_decls }
     }
-
 }
 
 FnDecl : DeclKind = {
-    "fn" <name:Ident> "(" <args:Comma<Var>> ")" <tlloc:@L> <ret:(":" <Type>)?> <rloc:@L> => {
+    "fn" <name:Ident> "(" <args:Comma<TypeFnVar>> ")" <tlloc:@L> <ret:(":" <Type>)?> <rloc:@L> => {
         let temp_void = Type { kind: TypeKind::Void, span: tlloc.span(rloc) };
         let kind = DeclKind::FnDecl {
             name, args, ty:ret.map_or(temp_void, |x| x)
@@ -113,6 +115,15 @@ pub Var: Var = {
     <v:TypeVar> => v
 }
 
+pub TypeFnVar : Var = {
+    <v:TypeVar> => v,
+    <lloc:@L> "this" <rloc:@L> => {
+        let name = Ident::new("this", lloc.span(rloc));
+        let ty = Type { kind: TypeKind::This, span: lloc.span(rloc) }; 
+        Var { name, ty: Some(ty), span: lloc.span(rloc) } 
+    }
+}
+
 UnTypedVar : Var = <lloc:@L> <v:Ident> <rloc:@L> => Var { name : v, ty: None, span: lloc.span(rloc) };
 TypeVar : Var = <lloc:@L> <v:Ident> ":" <t:Type> <rloc:@L> => Var { name: v, ty: Some(t), span: lloc.span(rloc) };
 
@@ -133,17 +144,20 @@ extern {
     type Error = LexError;
 
     enum Tok {
-        "()" => Tok::DoubleParen,
+        "interface" => Tok::Interface,
         "class" => Tok::Class,
         "type" => Tok::Type,
         "fn" => Tok::Fn,
+        "for" => Tok::For,
         "let" => Tok::Let,
         "return" => Tok::Return,
+        "this" => Tok::This,
         "+" => Tok::Plus,
         "=" => Tok::Equal,
         "." => Tok::Dot,
         "(" => Tok::LParen,
         ")" => Tok::RParen,
+        "()" => Tok::DoubleParen,
         "{" => Tok::LBrace,
         "}" => Tok::RBrace,
         ":" => Tok::Colon,

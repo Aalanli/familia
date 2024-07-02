@@ -33,7 +33,7 @@ pub fn parse(program: &ModSource) -> PhaseResult<Decl> {
                         highlight_message: Some(error.get_message().into()),
                         ..Default::default()
                     });
-                    return Err(program);
+                    return Err(program.err());
                 }
             };
             program.add_err(ProgramError {
@@ -42,7 +42,7 @@ pub fn parse(program: &ModSource) -> PhaseResult<Decl> {
                 highlight_message: Some(msg.into()),
                 ..Default::default()
             });
-            Err(program)
+            Err(program.err())
         }
     }
 }

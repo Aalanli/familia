@@ -34,18 +34,18 @@ impl Loc {
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Symbol {
-    name: Rc<str>,
+    name: Box<str>,
 }
 
 impl Default for Symbol {
     fn default() -> Self {
-        Symbol { name: Rc::from("") }
+        Symbol { name: Box::from("") }
     }
 }
 
 impl Symbol {
     pub fn from_str(s: &str) -> Self {
-        Symbol { name: Rc::from(s) }
+        Symbol { name: Box::from(s) }
     }
 
     pub fn view(&self) -> &str {
@@ -63,6 +63,13 @@ impl Ident {
     pub fn get_str(&self) -> &str {
         self.name.view()
     }
+
+    pub fn new(name: &str, span: Span) -> Self {
+        Ident {
+            name: Symbol::from_str(name),
+            span,
+        }
+    }
 }
 
 impl Display for Ident {
@@ -73,11 +80,14 @@ impl Display for Ident {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Tok {
+    Interface,
     Class,
     Type,
     Fn,
+    For,
     Let,
     Return,
+    This, // this
     Plus,
     Equal,
     Dot,
@@ -373,7 +383,10 @@ impl<T: Iterator<Item = char>> Lexer<T> {
 
             self.fill_ident();
             // println!("{:?}", self.buf.iter().collect::<String>());
-            if self.match_and_eat("class") {
+            if self.match_and_eat("interface") {
+                let rpos = self.get_loc();
+                return Some(Ok((lpos, Tok::Interface, rpos)));
+            } else if self.match_and_eat("class") {
                 let rpos = self.get_loc();
                 return Some(Ok((lpos, Tok::Class, rpos)));
             } else if self.match_and_eat("type") {
@@ -388,6 +401,12 @@ impl<T: Iterator<Item = char>> Lexer<T> {
             } else if self.match_and_eat("return") {
                 let rpos = self.get_loc();
                 return Some(Ok((lpos, Tok::Return, rpos)));
+            } else if self.match_and_eat("this") {
+                let rpos = self.get_loc();
+                return Some(Ok((lpos, Tok::This, rpos)));
+            } else if self.match_and_eat("for") {
+                let rpos = self.get_loc();
+                return Some(Ok((lpos, Tok::For, rpos)));
             } else if self.buf.iter().all(|x| x.is_numeric()) {
                 // todo: should change to regex
                 let span = lpos.span(self.get_loc());
