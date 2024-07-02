@@ -9,7 +9,7 @@ pub mod transforms;
 use std::{cell::RefCell, collections::HashSet, fmt::Display, hash::Hash, rc::Rc};
 
 pub use parser::parse;
-pub use transforms::{transform_ir, ast_to_ir};
+pub use transforms::{ast_to_ir, transform_ir};
 
 pub type PhaseResult<T> = Result<T, PhaseError>;
 
@@ -85,9 +85,21 @@ impl Display for PhaseError {
         let lines = self.text.lines().collect::<Vec<_>>();
         for err in self.errors.iter() {
             match err.error_type {
-                error::Error => write!(f, "{} : {}", "Error".red().bold(), err.error_message.red())?,
-                error::Warning => write!(f, "{} : {}", "Warning".yellow().bold(), err.error_message.yellow())?,
-                error::InternalError => write!(f, "{} : {}", "Internal Error".red().bold(), err.error_message.red())?,
+                error::Error => {
+                    write!(f, "{} : {}", "Error".red().bold(), err.error_message.red())?
+                }
+                error::Warning => write!(
+                    f,
+                    "{} : {}",
+                    "Warning".yellow().bold(),
+                    err.error_message.yellow()
+                )?,
+                error::InternalError => write!(
+                    f,
+                    "{} : {}",
+                    "Internal Error".red().bold(),
+                    err.error_message.red()
+                )?,
             }
             write!(f, "\n")?;
             if let Some(file) = &self.file {
@@ -100,12 +112,21 @@ impl Display for PhaseError {
                     write!(f, "{}\n", line)?;
                     assert!(span.lhs.start <= span.rhs.start);
                     write!(f, "{}", " ".repeat(span.lhs.start as usize - 1))?;
-                    write!(f, "{}", "^".repeat((span.rhs.start - span.lhs.start) as usize).yellow())?;
+                    write!(
+                        f,
+                        "{}",
+                        "^".repeat((span.rhs.start - span.lhs.start) as usize)
+                            .yellow()
+                    )?;
                     if let Some(highlight) = &err.highlight_message {
                         write!(f, "  {}", highlight.green())?;
-                    }                    
+                    }
                 } else if span.lhs.line < span.rhs.line {
-                    write!(f, ": {}:{} <=> {}:{}\n", span.lhs.line, span.lhs.start, span.rhs.line, span.rhs.start)?;
+                    write!(
+                        f,
+                        ": {}:{} <=> {}:{}\n",
+                        span.lhs.line, span.lhs.start, span.rhs.line, span.rhs.start
+                    )?;
                     for i in span.lhs.line..=span.rhs.line {
                         let line = lines[i as usize - 1];
                         write!(f, "{}\n", line)?;
@@ -117,7 +138,7 @@ impl Display for PhaseError {
             }
             write!(f, "\n\n")?;
         }
-        
+
         Ok(())
     }
 }

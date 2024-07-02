@@ -1,5 +1,5 @@
-pub mod utils;
 mod ast_to_ir;
+pub mod utils;
 
 pub use ast_to_ir::ast_to_ir;
 
@@ -11,9 +11,8 @@ pub struct PrimitiveRegistry {
     pub void: ir::TypeID,
     pub This: ir::TypeID,
     pub Self_: ir::TypeID,
-    pub fns: HashMap<String, ir::FuncID>
+    pub fns: HashMap<String, ir::FuncID>,
 }
-
 
 use std::{
     collections::{HashMap, HashSet},

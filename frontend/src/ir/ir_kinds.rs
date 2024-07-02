@@ -381,8 +381,6 @@ pub struct GlobalConst {
     pub value: ConstKind,
 }
 
-
-
 impl_id!(ClassID, ClassImpl, false);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -401,7 +399,6 @@ pub struct InterfaceImpl {
     pub methods: Vec<FuncDecl>,
 }
 
-
 impl_id!(ModuleID, Module, false);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -414,4 +411,3 @@ pub struct Module {
     pub main: Option<FuncID>,
     pub src: Option<crate::ModSource>,
 }
-

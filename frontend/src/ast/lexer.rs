@@ -39,7 +39,9 @@ pub struct Symbol {
 
 impl Default for Symbol {
     fn default() -> Self {
-        Symbol { name: Box::from("") }
+        Symbol {
+            name: Box::from(""),
+        }
     }
 }
 

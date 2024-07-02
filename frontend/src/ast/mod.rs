@@ -39,10 +39,12 @@ impl TypeKind {
             TypeKind::String => vec![],
             TypeKind::This => vec![],
             TypeKind::Self_ => vec![],
-            TypeKind::Struct { fields } => 
-                fields.iter().map(|f| f.ty.as_ref().unwrap().kind.ref_paths()).flatten().collect(),
+            TypeKind::Struct { fields } => fields
+                .iter()
+                .map(|f| f.ty.as_ref().unwrap().kind.ref_paths())
+                .flatten()
+                .collect(),
             TypeKind::Symbol(path) => vec![path],
-        
         }
     }
 }
@@ -131,7 +133,9 @@ impl Decl {
             DeclKind::FnDecl { .. } => vec![],
             DeclKind::FnImpl { .. } => vec![],
             DeclKind::ClassImpl { sub_decls, .. } => sub_decls.iter().collect(),
-            DeclKind::InterfaceImpl { sub_decls: body, .. } => body.iter().collect(),
+            DeclKind::InterfaceImpl {
+                sub_decls: body, ..
+            } => body.iter().collect(),
             DeclKind::Module { decls, .. } => decls.iter().collect(),
         }
     }
@@ -173,7 +177,6 @@ pub struct Path {
     pub path: Vec<Ident>,
     pub span: Span,
 }
-
 
 impl Path {
     pub fn len(&self) -> usize {
@@ -242,7 +245,9 @@ pub fn default_visit_decl<'a>(decl: &'a Decl, visitor: &mut impl Visitor<'a>) {
                 visitor.visit_decl(sub_decl);
             }
         }
-        DeclKind::InterfaceImpl { sub_decls: body, .. } => {
+        DeclKind::InterfaceImpl {
+            sub_decls: body, ..
+        } => {
             for sub_decl in body {
                 visitor.visit_decl(sub_decl);
             }

@@ -1,6 +1,5 @@
-use std::hash::Hash;
 use std::collections::HashMap;
-
+use std::hash::Hash;
 
 #[derive(Debug, Clone)]
 struct PointerHashKey<'a, K: ?Sized> {
@@ -44,7 +43,7 @@ impl<'a, K: ?Sized, V> PointerHashMap<'a, K, V> {
     pub fn contains_key(&self, key: &'a K) -> bool {
         self.map.contains_key(&PointerHashKey { key })
     }
-    
+
     pub fn remove(&mut self, key: &'a K) -> Option<V> {
         self.map.remove(&PointerHashKey { key })
     }
@@ -53,6 +52,8 @@ impl<'a, K: ?Sized, V> PointerHashMap<'a, K, V> {
     where
         F: FnOnce() -> V,
     {
-        self.map.entry(PointerHashKey { key }).or_insert_with(default)
+        self.map
+            .entry(PointerHashKey { key })
+            .or_insert_with(default)
     }
 }

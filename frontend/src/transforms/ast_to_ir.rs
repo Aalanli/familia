@@ -1,12 +1,12 @@
+use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use lazy_static::lazy_static;
 
+use super::utils::PointerHashMap;
+use super::PrimitiveRegistry;
 use crate::ast;
 use crate::ir;
 use crate::prelude::*;
-use super::PrimitiveRegistry;
-use super::utils::PointerHashMap;
 
 use ast::Decl;
 use ast::Visitor;
@@ -48,7 +48,7 @@ fn to_str(i: i32): String
 ";
 
 lazy_static! {
-    static ref BUILTIN_INC : Vec<ast::Decl> = {
+    static ref BUILTIN_INC: Vec<ast::Decl> = {
         let src = BUILTIN_INCLUDE.into();
         let m = crate::parse(&src).unwrap();
         if let ast::DeclKind::Module { decls, .. } = m.kind {
@@ -57,8 +57,7 @@ lazy_static! {
             unreachable!()
         }
     };
-
-    static ref BUILTIN_FNS : HashSet<&'static str> = {
+    static ref BUILTIN_FNS: HashSet<&'static str> = {
         let mut s = HashSet::new();
         for decl in BUILTIN_INC.iter() {
             if let ast::DeclKind::FnDecl { name, .. } = &decl.kind {
@@ -66,7 +65,6 @@ lazy_static! {
             }
         }
         s
-    
     };
 }
 
@@ -117,7 +115,7 @@ fn insert_builtins(state: &mut LowerModule<'_>) {
     let tvoid = ir::TypeID::insert(&state.ir, ir::TypeKind::Void);
     let tthis = ir::TypeID::insert(&state.ir, ir::TypeKind::This);
     let tself = ir::TypeID::insert(&state.ir, ir::TypeKind::Self_);
-    
+
     let mut fns = HashMap::new();
     for decl in BUILTIN_INC.iter() {
         if let ast::DeclKind::FnDecl { name, args, ty } = &decl.kind {
@@ -145,7 +143,7 @@ fn insert_builtins(state: &mut LowerModule<'_>) {
 struct PathAnalysis<'a> {
     name: &'a ast::Ident,
     decl: &'a ast::Decl,
-    sub_decls: HashMap<&'a str, PathAnalysis<'a>>
+    sub_decls: HashMap<&'a str, PathAnalysis<'a>>,
 }
 
 fn path_analysis_helper<'s, 'a>(src: &'s ModSource, ast: &'a Decl) -> PathAnalysis<'a> {
@@ -164,7 +162,7 @@ fn path_analysis_helper<'s, 'a>(src: &'s ModSource, ast: &'a Decl) -> PathAnalys
     PathAnalysis {
         name: ast.name(),
         decl: ast,
-        sub_decls
+        sub_decls,
     }
 }
 
@@ -189,7 +187,11 @@ fn check_basic<'a>(src: &'a ModSource, ast: &Decl) -> PhaseResult<()> {
                     }
                 }
             }
-            if let ast::DeclKind::InterfaceImpl { name, sub_decls: body } = &decl.kind {
+            if let ast::DeclKind::InterfaceImpl {
+                name,
+                sub_decls: body,
+            } = &decl.kind
+            {
                 for sub_decl in body.iter() {
                     if let ast::DeclKind::FnDecl { .. } = &sub_decl.kind {
                     } else {
@@ -232,9 +234,12 @@ impl<'a> PathToDeclAnalysis<'a> {
     }
 }
 
-
 // every path must be fully qualified for now
-fn path_to_decl<'a, 's>(src: &'s ModSource, ast: &'a Decl, paths: &PathAnalysis<'a>) -> PhaseResult<PathToDeclAnalysis<'a>> {
+fn path_to_decl<'a, 's>(
+    src: &'s ModSource,
+    ast: &'a Decl,
+    paths: &PathAnalysis<'a>,
+) -> PhaseResult<PathToDeclAnalysis<'a>> {
     let mut path_map = HashMap::new();
     let mut visitor = GetPath { paths: Vec::new() };
     visitor.visit_decl(&ast);
@@ -258,7 +263,7 @@ fn path_to_decl<'a, 's>(src: &'s ModSource, ast: &'a Decl, paths: &PathAnalysis<
         }
         path_map.insert(UniquePathHashKey(path), cur.decl);
     }
-    src.commit_error(PathToDeclAnalysis {path_map})
+    src.commit_error(PathToDeclAnalysis { path_map })
 }
 
 struct CollectTypeDecl<'a> {
@@ -274,10 +279,11 @@ impl<'a> ast::Visitor<'a> for CollectTypeDecl<'a> {
 }
 
 fn assert_no_type_cycle_helper<'s, 'a>(
-    src: &'s ModSource, 
-    ast: &'a ast::Decl, 
+    src: &'s ModSource,
+    ast: &'a ast::Decl,
     path_map: &'a PathToDeclAnalysis<'a>,
-    visited: &mut PointerHashMap<'a, ast::Decl, ()>) -> PResult<()> {
+    visited: &mut PointerHashMap<'a, ast::Decl, ()>,
+) -> PResult<()> {
     if visited.contains_key(ast) {
         return Err(ProgramError {
             error_message: "type cycle",
@@ -301,9 +307,9 @@ fn assert_no_type_cycle_helper<'s, 'a>(
 }
 
 fn assert_no_type_cycle<'s, 'a>(
-    src: &'s ModSource, 
+    src: &'s ModSource,
     path_map: &PathToDeclAnalysis<'a>,
-    ast: &'a ast::Decl
+    ast: &'a ast::Decl,
 ) -> PhaseResult<()> {
     let mut visitor = CollectTypeDecl { decls: Vec::new() };
     visitor.visit_decl(ast);
@@ -316,7 +322,6 @@ fn assert_no_type_cycle<'s, 'a>(
 
     src.commit_error(())
 }
-
 
 struct Temporaries<'a> {
     ty_decl_to_id: PointerHashMap<'a, ast::Decl, ir::TypeDeclID>,
@@ -352,8 +357,13 @@ impl std::cmp::Eq for UniquePathHashKey<'_> {}
 
 impl std::cmp::PartialEq for UniquePathHashKey<'_> {
     fn eq(&self, other: &Self) -> bool {
-        self.0.path.len() == other.0.path.len() &&
-            self.0.path.iter().zip(other.0.path.iter()).all(|(a, b)| a.get_str() == b.get_str())
+        self.0.path.len() == other.0.path.len()
+            && self
+                .0
+                .path
+                .iter()
+                .zip(other.0.path.iter())
+                .all(|(a, b)| a.get_str() == b.get_str())
     }
 }
 
@@ -382,7 +392,7 @@ fn construct_types_helper<'a>(
             for field in fields {
                 let fsym = ir::SymbolID::insert(&ir, field.name.get_str());
                 let fty = field.ty.as_ref().unwrap();
-                let fty_id = construct_types_helper(src, path_map, ir, temp,fty)?;
+                let fty_id = construct_types_helper(src, path_map, ir, temp, fty)?;
                 field_ids.push((fsym, fty_id));
             }
             let id = ir::TypeID::insert(&ir, ir::TypeKind::Struct { fields: field_ids });
@@ -413,7 +423,7 @@ fn construct_types_helper<'a>(
                             ..Default::default()
                         });
                         None
-                    },
+                    }
                 }
             }?;
             temp.path_ty_cache.insert(UniquePathHashKey(path), ty);
@@ -422,16 +432,24 @@ fn construct_types_helper<'a>(
     }
 }
 
-fn construct_types<'a>(
-    state: &mut LowerModule<'a>,
-    ty_decl: &'a ast::Type,
-) -> Option<ir::TypeID> {
-    let LowerModule { src, path_map, ir, temp } = state;
+fn construct_types<'a>(state: &mut LowerModule<'a>, ty_decl: &'a ast::Type) -> Option<ir::TypeID> {
+    let LowerModule {
+        src,
+        path_map,
+        ir,
+        temp,
+    } = state;
     construct_types_helper(src, path_map, ir, temp, ty_decl)
 }
 
 fn visit_module<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Option<ir::ModuleID> {
-    if let ast::DeclKind::Module { name, file, top, decls } = &decl.kind {
+    if let ast::DeclKind::Module {
+        name,
+        file,
+        top,
+        decls,
+    } = &decl.kind
+    {
         let mut module = ir::Module::default();
         for decl in decls {
             if decl.kind.is_type_decl() {
@@ -509,21 +527,30 @@ fn visit_type_decl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Opti
     }
 }
 
-fn get_fn_decl<'a>(state: &mut LowerModule<'a>, span: ast::Span, name: &ast::Ident, args: &'a Vec<ast::Var>, ty: &'a ast::Type) -> Option<ir::FuncDecl> {
+fn get_fn_decl<'a>(
+    state: &mut LowerModule<'a>,
+    span: ast::Span,
+    name: &ast::Ident,
+    args: &'a Vec<ast::Var>,
+    ty: &'a ast::Type,
+) -> Option<ir::FuncDecl> {
     let rty = construct_types(state, ty)?;
-    let args: Option<Vec<_>> = args.iter().map(|arg| {
-        if arg.ty.is_none() {
-            state.src.add_err(ProgramError {
-                error_message: "expected a type",
-                span: Some(arg.span),
-                ..Default::default()
-            });
-            return None;
-        }
-        let ty = construct_types(state, arg.ty.as_ref().unwrap())?;
-        let sym = ir::SymbolID::insert(&state.ir, arg.name.get_str());
-        Some((sym, ty))
-    }).collect();
+    let args: Option<Vec<_>> = args
+        .iter()
+        .map(|arg| {
+            if arg.ty.is_none() {
+                state.src.add_err(ProgramError {
+                    error_message: "expected a type",
+                    span: Some(arg.span),
+                    ..Default::default()
+                });
+                return None;
+            }
+            let ty = construct_types(state, arg.ty.as_ref().unwrap())?;
+            let sym = ir::SymbolID::insert(&state.ir, arg.name.get_str());
+            Some((sym, ty))
+        })
+        .collect();
     let args = args?;
     Some(ir::FuncDecl {
         name: ir::SymbolID::insert(&state.ir, name.name.view()),
@@ -544,7 +571,13 @@ fn visit_var<'a>(state: &mut LowerModule<'a>, var: &'a ast::Var) -> Option<ir::V
 }
 
 fn visit_fn_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Option<ir::FuncID> {
-    if let ast::DeclKind::FnImpl { name, args, ty, body } = &decl.kind {
+    if let ast::DeclKind::FnImpl {
+        name,
+        args,
+        ty,
+        body,
+    } = &decl.kind
+    {
         let fdecl = get_fn_decl(state, decl.span, name, args, ty)?;
         let args: Option<Vec<_>> = args.iter().map(|arg| visit_var(state, arg)).collect();
         let args = args?;
@@ -649,7 +682,12 @@ fn visit_expr(
             let func_id = state
                 .path_map
                 .get(path)
-                .map(|decl| *state.temp.fn_impl_to_id.or_insert_with(decl, || state.ir.temporary_id()))
+                .map(|decl| {
+                    *state
+                        .temp
+                        .fn_impl_to_id
+                        .or_insert_with(decl, || state.ir.temporary_id())
+                })
                 .unwrap_or_else(|| {
                     assert!(is_builtin_fn(path));
                     get_builtin_fn(path, &state.ir)
@@ -739,18 +777,21 @@ fn insert_stmts(
             return;
         }
     }
-    let op_id = state.ir.insert(
-        ir::OP {
-            kind: op_kind,
-            span: stmt.span,
-            res: None,
-        },
-    );
+    let op_id = state.ir.insert(ir::OP {
+        kind: op_kind,
+        span: stmt.span,
+        res: None,
+    });
     ops.push(op_id);
 }
 
 fn visit_class_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Option<ir::ClassID> {
-    if let ast::DeclKind::ClassImpl { name, for_it, sub_decls } = &decl.kind {
+    if let ast::DeclKind::ClassImpl {
+        name,
+        for_it,
+        sub_decls,
+    } = &decl.kind
+    {
         let mut methods = vec![];
         let mut types = vec![];
         for sub_decl in sub_decls {
@@ -774,7 +815,10 @@ fn visit_class_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Opt
         }
         let itf = for_it.as_ref().map(|x| {
             let decl = state.path_map.get(x).unwrap();
-            *state.temp.itf_impl_to_id.or_insert_with(decl, || state.ir.temporary_id())
+            *state
+                .temp
+                .itf_impl_to_id
+                .or_insert_with(decl, || state.ir.temporary_id())
         });
         let cls = ir::ClassImpl {
             name: ir::SymbolID::insert(&state.ir, name.name.view()),
@@ -802,13 +846,22 @@ fn visit_class_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Opt
     }
 }
 
-fn visit_interface_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Option<ir::InterfaceID> {
-    if let ast::DeclKind::InterfaceImpl { name, sub_decls: body } = &decl.kind {
+fn visit_interface_impl<'a>(
+    state: &mut LowerModule<'a>,
+    decl: &'a ast::Decl,
+) -> Option<ir::InterfaceID> {
+    if let ast::DeclKind::InterfaceImpl {
+        name,
+        sub_decls: body,
+    } = &decl.kind
+    {
         let mut methods = vec![];
         for sub_decl in body {
             if let ast::DeclKind::FnDecl { name, args, ty } = &sub_decl.kind {
-                let Some(fdecl) = get_fn_decl(state, sub_decl.span, name, args, ty) else {continue};
-                methods.push(fdecl);  
+                let Some(fdecl) = get_fn_decl(state, sub_decl.span, name, args, ty) else {
+                    continue;
+                };
+                methods.push(fdecl);
             } else {
                 state.src.add_err(ProgramError {
                     error_message: "expected a function declaration",
@@ -840,9 +893,7 @@ fn visit_interface_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) ->
     }
 }
 
-
-
-/* 
+/*
 
 #[cfg(test)]
 mod ast_to_ir_test {
