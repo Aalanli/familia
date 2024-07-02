@@ -11,11 +11,12 @@ use super::utils::PointerHashMap;
 use ast::Decl;
 use ast::Visitor;
 
-pub fn ast_to_ir(src: ModSource, mut ast: Decl) -> PhaseResult<ir::IR> {
+pub fn ast_to_ir(src: ModSource, ast: Decl) -> PhaseResult<ir::IR> {
+    check_basic(&src, &ast)?;
     let path_analysis = path_analysis(&src, &ast)?;
     let path_to_decl = path_to_decl(&src, &ast, &path_analysis)?;
     assert_no_type_cycle(&src, &path_to_decl, &ast)?;
-    let mut ir = ir::IR::new();
+    let ir = ir::IR::new();
     let mut state = LowerModule {
         src,
         path_map: path_to_decl,
@@ -23,8 +24,11 @@ pub fn ast_to_ir(src: ModSource, mut ast: Decl) -> PhaseResult<ir::IR> {
         temp: Temporaries::new(),
     };
     insert_builtins(&mut state);
-    visit_module(&mut state, &ast);
-    src.commit_error(state.ir)
+    visit_module(&mut state, &ast).and_then(|id| {
+        state.ir.insert_global(id);
+        Some(())
+    });
+    state.src.commit_error(state.ir)
 }
 
 lazy_static! {
@@ -185,7 +189,7 @@ fn check_basic<'a>(src: &'a ModSource, ast: &Decl) -> PhaseResult<()> {
                     }
                 }
             }
-            if let ast::DeclKind::InterfaceImpl { name, body } = &decl.kind {
+            if let ast::DeclKind::InterfaceImpl { name, sub_decls: body } = &decl.kind {
                 for sub_decl in body.iter() {
                     if let ast::DeclKind::FnDecl { .. } = &sub_decl.kind {
                     } else {
@@ -222,8 +226,8 @@ impl<'a> ast::Visitor<'a> for GetPath<'a> {
 struct PathToDeclAnalysis<'a> {
     path_map: HashMap<UniquePathHashKey<'a>, &'a ast::Decl>,
 }
-impl PathToDeclAnalysis<'_> {
-    fn get(&self, path: &ast::Path) -> Option<&ast::Decl> {
+impl<'a> PathToDeclAnalysis<'a> {
+    fn get(&self, path: &ast::Path) -> Option<&'a ast::Decl> {
         self.path_map.get(&UniquePathHashKey(path)).copied()
     }
 }
@@ -272,7 +276,7 @@ impl<'a> ast::Visitor<'a> for CollectTypeDecl<'a> {
 fn assert_no_type_cycle_helper<'s, 'a>(
     src: &'s ModSource, 
     ast: &'a ast::Decl, 
-    path_map: &PathToDeclAnalysis<'a>,
+    path_map: &'a PathToDeclAnalysis<'a>,
     visited: &mut PointerHashMap<'a, ast::Decl, ()>) -> PResult<()> {
     if visited.contains_key(ast) {
         return Err(ProgramError {
@@ -360,26 +364,28 @@ struct LowerModule<'a> {
     temp: Temporaries<'a>,
 }
 
-fn construct_types<'a>(
-    state: &mut LowerModule<'a>,
-    ty_decl: &ast::Type,
+fn construct_types_helper<'a>(
+    src: &ModSource,
+    path_map: &PathToDeclAnalysis<'a>,
+    ir: &ir::IR,
+    temp: &mut Temporaries<'a>,
+    ty_decl: &'a ast::Type,
 ) -> Option<ir::TypeID> {
-    let LowerModule { src, ir, path_map, temp } = state;
     match &ty_decl.kind {
-        ast::TypeKind::Void => Some(ir::TypeID::insert(ir, ir::TypeKind::Void)),
-        ast::TypeKind::I32 => Some(ir::TypeID::insert(ir, ir::TypeKind::I32)),
-        ast::TypeKind::String => Some(ir::TypeID::insert(ir, ir::TypeKind::String)),
-        ast::TypeKind::This => Some(ir::TypeID::insert(ir, ir::TypeKind::This)),
-        ast::TypeKind::Self_ => Some(ir::TypeID::insert(ir, ir::TypeKind::Self_)),
+        ast::TypeKind::Void => Some(ir::TypeID::insert(&ir, ir::TypeKind::Void)),
+        ast::TypeKind::I32 => Some(ir::TypeID::insert(&ir, ir::TypeKind::I32)),
+        ast::TypeKind::String => Some(ir::TypeID::insert(&ir, ir::TypeKind::String)),
+        ast::TypeKind::This => Some(ir::TypeID::insert(&ir, ir::TypeKind::This)),
+        ast::TypeKind::Self_ => Some(ir::TypeID::insert(&ir, ir::TypeKind::Self_)),
         ast::TypeKind::Struct { fields } => {
             let mut field_ids = Vec::new();
             for field in fields {
-                let fsym = ir::SymbolID::insert(ir, field.name.get_str());
+                let fsym = ir::SymbolID::insert(&ir, field.name.get_str());
                 let fty = field.ty.as_ref().unwrap();
-                let fty_id = construct_types(state,fty)?;
+                let fty_id = construct_types_helper(src, path_map, ir, temp,fty)?;
                 field_ids.push((fsym, fty_id));
             }
-            let id = ir::TypeID::insert(ir, ir::TypeKind::Struct { fields: field_ids });
+            let id = ir::TypeID::insert(&ir, ir::TypeKind::Struct { fields: field_ids });
             Some(id)
         }
         ast::TypeKind::Symbol(path) => {
@@ -392,16 +398,16 @@ fn construct_types<'a>(
                     src.add_err(e);
                     return None;
                 }
-                Some(ir::TypeID::insert(ir, ty.unwrap()))
+                Some(ir::TypeID::insert(&ir, ty.unwrap()))
             } else {
                 let decl = path_map.get(path).unwrap();
                 match &decl.kind {
                     ast::DeclKind::TypeDecl { decl, .. } => {
-                        let id = construct_types(state, decl)?;
+                        let id = construct_types_helper(src, path_map, ir, temp, decl)?;
                         Some(id)
                     }
                     _ => {
-                        state.src.add_err(ProgramError {
+                        src.add_err(ProgramError {
                             error_message: "expected a type declaration",
                             span: Some(path.span),
                             ..Default::default()
@@ -414,6 +420,14 @@ fn construct_types<'a>(
             Some(ty)
         }
     }
+}
+
+fn construct_types<'a>(
+    state: &mut LowerModule<'a>,
+    ty_decl: &'a ast::Type,
+) -> Option<ir::TypeID> {
+    let LowerModule { src, path_map, ir, temp } = state;
+    construct_types_helper(src, path_map, ir, temp, ty_decl)
 }
 
 fn visit_module<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Option<ir::ModuleID> {
@@ -495,7 +509,7 @@ fn visit_type_decl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Opti
     }
 }
 
-fn get_fn_decl<'a>(state: &mut LowerModule<'a>, span: ast::Span, name: &ast::Ident, args: &Vec<ast::Var>, ty: &ast::Type) -> Option<ir::FuncDecl> {
+fn get_fn_decl<'a>(state: &mut LowerModule<'a>, span: ast::Span, name: &ast::Ident, args: &'a Vec<ast::Var>, ty: &'a ast::Type) -> Option<ir::FuncDecl> {
     let rty = construct_types(state, ty)?;
     let args: Option<Vec<_>> = args.iter().map(|arg| {
         if arg.ty.is_none() {
@@ -519,7 +533,7 @@ fn get_fn_decl<'a>(state: &mut LowerModule<'a>, span: ast::Span, name: &ast::Ide
     })
 }
 
-fn visit_var(state: &mut LowerModule<'_>, var: &ast::Var) -> Option<ir::VarID> {
+fn visit_var<'a>(state: &mut LowerModule<'a>, var: &'a ast::Var) -> Option<ir::VarID> {
     let ty = var.ty.as_ref().map(|ty| construct_types(state, ty))?;
     let id = state.ir.insert(ir::Var {
         name: ir::SymbolID::insert(&state.ir, var.name.get_str()),
@@ -537,7 +551,7 @@ fn visit_fn_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Option
         let mut var_map = HashMap::new();
         let mut ops = Vec::new();
         for stmt in body.iter() {
-            insert_stmts(state, &mut var_map, &mut ops, stmt, &mut state.ir);
+            insert_stmts(state, &mut var_map, &mut ops, stmt);
         }
         let func = ir::FuncImpl {
             decl: fdecl,
@@ -570,18 +584,17 @@ fn visit_expr(
     ops: &mut Vec<ir::OPID>,
     expr: &ast::Expr,
     parent_name: Option<ir::SymbolID>,
-    ir: &mut ir::IR,
 ) -> ir::VarID {
     match &expr.kind {
         ast::ExprKind::Var(v) => {
-            let sym = ir::SymbolID::insert(ir, v.name.get_str());
+            let sym = ir::SymbolID::insert(&state.ir, v.name.get_str());
             let var_id = var_map.get(&sym).unwrap();
             return *var_id;
         }
         ast::ExprKind::IntLit(i) => {
-            let id = ir.temporary_id();
-            let var = ir::VarID::new_var(ir, parent_name, None, Some(expr.span));
-            ir.insert_with(
+            let id = state.ir.temporary_id();
+            let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
+            state.ir.insert_with(
                 id,
                 ir::OP {
                     kind: ir::OPKind::Constant(ir::ConstKind::I32(*i)),
@@ -593,13 +606,13 @@ fn visit_expr(
             return var;
         }
         ast::ExprKind::StringLit(s) => {
-            let id = ir.temporary_id();
-            let var = ir::VarID::new_var(ir, parent_name, None, Some(expr.span));
-            ir.insert_with(
+            let id = state.ir.temporary_id();
+            let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
+            state.ir.insert_with(
                 id,
                 ir::OP {
                     kind: ir::OPKind::Constant(ir::ConstKind::String(ir::SymbolID::insert(
-                        ir, s,
+                        &state.ir, s,
                     ))),
                     span: expr.span,
                     res: Some(var),
@@ -609,15 +622,15 @@ fn visit_expr(
             return var;
         }
         ast::ExprKind::GetAttr { exp, sym } => {
-            let expr_id = visit_expr(state, var_map, ops, exp, parent_name, ir);
-            let var = ir::VarID::new_var(ir, parent_name, None, Some(expr.span));
-            let id = ir.temporary_id();
-            ir.insert_with(
+            let expr_id = visit_expr(state, var_map, ops, exp, parent_name);
+            let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
+            let id = state.ir.temporary_id();
+            state.ir.insert_with(
                 id,
                 ir::OP {
                     kind: ir::OPKind::GetAttr {
                         obj: expr_id,
-                        attr: ir::SymbolID::insert(ir, sym.get_str()),
+                        attr: ir::SymbolID::insert(&state.ir, sym.get_str()),
                         idx: None,
                     },
                     span: expr.span,
@@ -630,7 +643,7 @@ fn visit_expr(
         ast::ExprKind::Call { path, args } => {
             let var_ids = args
                 .iter()
-                .map(|expr: &ast::Expr| visit_expr(state, var_map, ops, expr, parent_name, ir))
+                .map(|expr: &ast::Expr| visit_expr(state, var_map, ops, expr, parent_name))
                 .collect();
             // TODO: could call class constructor
             let func_id = state
@@ -641,10 +654,10 @@ fn visit_expr(
                     assert!(is_builtin_fn(path));
                     get_builtin_fn(path, &state.ir)
                 });
-            let func_ret = ir.get(func_id).decl.ret_ty;
-            let var = ir::VarID::new_var(ir, parent_name, None, Some(expr.span));
-            let id = ir.temporary_id();
-            ir.insert_with(
+            let func_ret = state.ir.get(func_id).decl.ret_ty;
+            let var = ir::VarID::new_var(&state.ir, parent_name, Some(func_ret), Some(expr.span));
+            let id = state.ir.temporary_id();
+            state.ir.insert_with(
                 id,
                 ir::OP {
                     kind: ir::OPKind::Call {
@@ -659,11 +672,11 @@ fn visit_expr(
             return var;
         }
         ast::ExprKind::Add { lhs, rhs } => {
-            let lhs_id = visit_expr(state, var_map, ops, lhs, parent_name, ir);
-            let rhs_id = visit_expr(state, var_map, ops, rhs, parent_name, ir);
-            let var = ir::VarID::new_var(ir, parent_name, None, Some(expr.span));
-            let id = ir.temporary_id();
-            ir.insert_with(
+            let lhs_id = visit_expr(state, var_map, ops, lhs, parent_name);
+            let rhs_id = visit_expr(state, var_map, ops, rhs, parent_name);
+            let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
+            let id = state.ir.temporary_id();
+            state.ir.insert_with(
                 id,
                 ir::OP {
                     kind: ir::OPKind::Add {
@@ -680,12 +693,12 @@ fn visit_expr(
         ast::ExprKind::Struct { args } => {
             let mut field_ids = Vec::new();
             for (sym, expr) in args.iter() {
-                let var_id = visit_expr(state, var_map, ops, expr, parent_name, ir);
-                field_ids.push((ir::SymbolID::insert(ir, &sym.name.view()), var_id));
+                let var_id = visit_expr(state, var_map, ops, expr, parent_name);
+                field_ids.push((ir::SymbolID::insert(&state.ir, &sym.name.view()), var_id));
             }
-            let var = ir::VarID::new_var(ir, parent_name, None, Some(expr.span));
-            let id = ir.temporary_id();
-            ir.insert_with(
+            let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
+            let id = state.ir.temporary_id();
+            state.ir.insert_with(
                 id,
                 ir::OP {
                     kind: ir::OPKind::Struct { fields: field_ids },
@@ -704,21 +717,20 @@ fn insert_stmts(
     var_map: &mut HashMap<ir::SymbolID, ir::VarID>,
     ops: &mut Vec<ir::OPID>,
     stmt: &ast::Stmt,
-    ir: &mut ir::IR,
 ) {
     let op_kind;
     match &stmt.kind {
         ast::StmtKind::ReturnStmt { expr } => {
-            let var = visit_expr(state, var_map, ops, expr, None, ir);
+            let var = visit_expr(state, var_map, ops, expr, None);
             op_kind = ir::OPKind::Return { value: var };
         }
         ast::StmtKind::ExprStmt { expr } => {
-            let _var = visit_expr(state, var_map, ops, expr, None, ir);
+            let _var = visit_expr(state, var_map, ops, expr, None);
             return;
         }
         ast::StmtKind::LetStmt { var, expr } => {
-            let var_sym = ir::SymbolID::insert(ir, var.name.get_str());
-            let expr_id = visit_expr(state, var_map, ops, expr, Some(var_sym), ir);
+            let var_sym = ir::SymbolID::insert(&state.ir, var.name.get_str());
+            let expr_id = visit_expr(state, var_map, ops, expr, Some(var_sym));
             var_map.insert(var_sym, expr_id);
             // op_kind = ir::OPKind::Assign {
             //     lhs: var_id,
@@ -727,7 +739,7 @@ fn insert_stmts(
             return;
         }
     }
-    let op_id = ir.insert(
+    let op_id = state.ir.insert(
         ir::OP {
             kind: op_kind,
             span: stmt.span,
@@ -791,7 +803,7 @@ fn visit_class_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Opt
 }
 
 fn visit_interface_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Option<ir::InterfaceID> {
-    if let ast::DeclKind::InterfaceImpl { name, body } = &decl.kind {
+    if let ast::DeclKind::InterfaceImpl { name, sub_decls: body } = &decl.kind {
         let mut methods = vec![];
         for sub_decl in body {
             if let ast::DeclKind::FnDecl { name, args, ty } = &sub_decl.kind {

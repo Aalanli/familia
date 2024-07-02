@@ -71,11 +71,6 @@ fn generate_llvm_type<'ctx, 'ir>(
             );
             struct_ty.into()
         }
-        ir::TypeKind::Rec { id: decl } => code
-            .context
-            .get_struct_type(&ir.namer.try_name_type(*decl).unwrap())
-            .unwrap()
-            .into(),
         ir::TypeKind::I32 => code.context.i32_type().into(),
         ir::TypeKind::Void => {
             panic!("void type not allowed here");

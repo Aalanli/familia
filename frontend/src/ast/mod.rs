@@ -77,7 +77,7 @@ pub enum DeclKind {
     },
     InterfaceImpl {
         name: Ident,
-        body: Vec<Decl>,
+        sub_decls: Vec<Decl>,
     },
     Module {
         name: Ident,
@@ -131,7 +131,7 @@ impl Decl {
             DeclKind::FnDecl { .. } => vec![],
             DeclKind::FnImpl { .. } => vec![],
             DeclKind::ClassImpl { sub_decls, .. } => sub_decls.iter().collect(),
-            DeclKind::InterfaceImpl { body, .. } => body.iter().collect(),
+            DeclKind::InterfaceImpl { sub_decls: body, .. } => body.iter().collect(),
             DeclKind::Module { decls, .. } => decls.iter().collect(),
         }
     }
@@ -242,7 +242,7 @@ pub fn default_visit_decl<'a>(decl: &'a Decl, visitor: &mut impl Visitor<'a>) {
                 visitor.visit_decl(sub_decl);
             }
         }
-        DeclKind::InterfaceImpl { body, .. } => {
+        DeclKind::InterfaceImpl { sub_decls: body, .. } => {
             for sub_decl in body {
                 visitor.visit_decl(sub_decl);
             }

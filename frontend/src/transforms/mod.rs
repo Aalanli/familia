@@ -220,8 +220,10 @@ fn rewrite_var_types<'s>(ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<()>
     Ok(())
 }
 
-pub fn transform_ir<'s>(ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<()> {
-    rewrite_var_types(ir, src)?;
+pub fn transform_ir<'s>(ir: &mut ir::IR) -> PhaseResult<()> {
+    let module = ir.get_global::<ir::ModuleID>().unwrap();
+    let src = ir.get(*module).src.clone().unwrap();
+    rewrite_var_types(ir, &src)?;
     insert_rts_fns(ir);
     lower_to_rts(ir);
     Ok(())
@@ -417,7 +419,7 @@ mod test_type_infer {
         let src = s.into();
         let ast = crate::parse(&src).unwrap();
         let mut ir = crate::ast_to_ir(src, ast).unwrap();
-        transform_ir(&mut ir, &src).unwrap();
+        transform_ir(&mut ir).unwrap();
         ir
     }
 
