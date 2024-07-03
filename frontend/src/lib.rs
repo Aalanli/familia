@@ -6,7 +6,7 @@ pub mod prelude;
 pub mod query;
 pub mod transforms;
 
-use std::{cell::RefCell, collections::HashSet, fmt::Display, hash::Hash, rc::Rc};
+use std::{cell::RefCell, collections::HashSet, fmt::{Debug, Display}, hash::Hash, rc::Rc};
 
 pub use parser::parse;
 pub use transforms::{ast_to_ir, transform_ir};
@@ -72,11 +72,17 @@ impl From<&str> for ModSource {
     }
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct PhaseError {
     text: Rc<String>,
     file: Option<Rc<String>>,
     errors: Vec<error::ProgramError>,
+}
+
+impl Debug for PhaseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\n{}", self)
+    }
 }
 
 use colored::Colorize;
@@ -111,7 +117,7 @@ impl Display for PhaseError {
                     let line = lines[span.lhs.line as usize - 1];
                     write!(f, "{}\n", line)?;
                     assert!(span.lhs.start <= span.rhs.start);
-                    write!(f, "{}", " ".repeat(span.lhs.start as usize - 1))?;
+                    write!(f, "{}", " ".repeat(span.lhs.start as usize))?;
                     write!(
                         f,
                         "{}",

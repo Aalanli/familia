@@ -140,6 +140,7 @@ fn insert_builtins(state: &mut LowerModule<'_>) {
     state.ir.insert_global(regs);
 }
 
+#[derive(Debug)]
 struct PathAnalysis<'a> {
     name: &'a ast::Ident,
     decl: &'a ast::Decl,
@@ -225,6 +226,7 @@ impl<'a> ast::Visitor<'a> for GetPath<'a> {
     }
 }
 
+#[derive(Debug)]
 struct PathToDeclAnalysis<'a> {
     path_map: HashMap<UniquePathHashKey<'a>, &'a ast::Decl>,
 }
@@ -274,6 +276,8 @@ impl<'a> ast::Visitor<'a> for CollectTypeDecl<'a> {
     fn visit_decl(&mut self, decl: &'a ast::Decl) {
         if let ast::DeclKind::TypeDecl { .. } = &decl.kind {
             self.decls.push(decl);
+        } else {
+            ast::default_visit_decl(decl, self);
         }
     }
 }
@@ -343,6 +347,7 @@ impl<'a> Temporaries<'a> {
     }
 }
 
+#[derive(Debug)]
 struct UniquePathHashKey<'a>(&'a ast::Path);
 
 impl std::hash::Hash for UniquePathHashKey<'_> {
@@ -458,11 +463,20 @@ fn visit_module<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Option<
                     Some(())
                 });
             } else if decl.kind.is_fn_impl() {
-                visit_fn_impl(state, decl);
+                visit_fn_impl(state, decl).and_then(|id| {
+                    module.funcs.push(id);
+                    Some(())
+                });
             } else if decl.kind.is_class_impl() {
-                visit_class_impl(state, decl);
+                visit_class_impl(state, decl).and_then(|id| {
+                    module.classes.push(id);
+                    Some(())
+                });
             } else if decl.kind.is_interface_impl() {
-                visit_interface_impl(state, decl);
+                visit_interface_impl(state, decl).and_then(|id| {
+                    module.interfaces.push(id);
+                    Some(())
+                });
             } else {
                 state.src.add_err(ProgramError {
                     error_message: "expected a type declaration, function implementation, class implementation, or interface implementation",
@@ -573,15 +587,18 @@ fn visit_var<'a>(state: &mut LowerModule<'a>, var: &'a ast::Var) -> Option<ir::V
 fn visit_fn_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Option<ir::FuncID> {
     if let ast::DeclKind::FnImpl {
         name,
-        args,
+        args: fargs,
         ty,
         body,
     } = &decl.kind
     {
-        let fdecl = get_fn_decl(state, decl.span, name, args, ty)?;
-        let args: Option<Vec<_>> = args.iter().map(|arg| visit_var(state, arg)).collect();
+        let fdecl = get_fn_decl(state, decl.span, name, fargs, ty)?;
+        let args: Option<Vec<_>> = fargs.iter().map(|arg| visit_var(state, arg)).collect();
         let args = args?;
         let mut var_map = HashMap::new();
+        for (fvar, var) in fargs.iter().zip(args.iter()) {
+            var_map.insert(ir::SymbolID::insert(&state.ir, fvar.name.get_str()), *var);
+        }
         let mut ops = Vec::new();
         for stmt in body.iter() {
             insert_stmts(state, &mut var_map, &mut ops, stmt);
@@ -801,7 +818,7 @@ fn visit_class_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Opt
                     Some(())
                 });
             } else if sub_decl.kind.is_type_decl() {
-                visit_type_decl(state, decl).and_then(|id| {
+                visit_type_decl(state, sub_decl).and_then(|id| {
                     types.push(id);
                     Some(())
                 });
@@ -893,7 +910,7 @@ fn visit_interface_impl<'a>(
     }
 }
 
-/*
+
 
 #[cfg(test)]
 mod ast_to_ir_test {
@@ -917,14 +934,13 @@ mod ast_to_ir_test {
         .into();
         let ast = parse(&src).unwrap();
 
-        let _t = path_to_decl(&src, &ast).unwrap();
-        // for (k, v) in _t.map.iter() {
-        //     println!("{} -> {}", k.key, v.name());
-        // }
+        check_basic(&src, &ast).expect_err("expected error");
+        let path_analysis = path_analysis(&src, &ast).unwrap();
+        let _path_to_decl = path_to_decl(&src, &ast, &path_analysis).unwrap();
     }
 
     #[test]
-    fn test_ast_to_ir() {
+    fn test_ast_to_ir() -> PhaseResult<()> {
         let src = "\
         type T = {a: i32, b: i32}
         type R = {a: T, b: T}
@@ -937,10 +953,9 @@ mod ast_to_ir_test {
         "
         .into();
         let ast = parse(&src).unwrap();
-        // println!("{:?}", ast);
-
-        let _ir = ast_to_ir(&src, &ast).unwrap();
+        let _ir = ast_to_ir(src, ast)?;
         println!("{}", ir::print_basic(&_ir));
+        Ok(())
     }
 
     #[test]
@@ -952,8 +967,60 @@ mod ast_to_ir_test {
         "
         .into();
         let ast = parse(&src).unwrap();
-        let _ir = ast_to_ir(&src, &ast).unwrap();
+        let _ir = ast_to_ir(src, ast).unwrap();
         println!("{}", ir::print_basic(&_ir));
     }
+
+    #[test]
+    fn test_type_cycle() {
+        let src = [
+        "\
+        type A = {a: B}
+        type B = {a: C, b: C}
+        type C = {a: A}",
+        "\
+        type A = {a: A}",
+        "\
+        type A = {a: B}
+        type B = {a: C}
+        type C = {a: B}"];
+        for src in src {
+            let src = src.into();
+            let ast = parse(&src).unwrap();
+            check_basic(&src, &ast).unwrap();
+            let path_analysis = path_analysis(&src, &ast).unwrap();
+            let path_to_decl = path_to_decl(&src, &ast, &path_analysis).unwrap();
+            assert_no_type_cycle(&src, &path_to_decl, &ast).expect_err("expected type cycle");
+        }
+    }
+
+    #[test]
+    fn test_this() {
+        let src = "\
+        interface Foo {
+            fn foo(this, a: i32): Self
+        }
+        class Bar {
+            fn foo(this, a: This): This {
+                return this;
+            }
+        }
+        fn main() {
+        }
+        ".into();
+        let ast = parse(&src);
+        if let Err(e) = ast {
+            println!("{}", e);
+        } else {
+            let ast = ast.unwrap();
+
+            let _ir = ast_to_ir(src, ast);
+            if let Err(e) = _ir {
+                println!("{}", e);
+            } else {
+                println!("{}", ir::print_basic(&_ir.unwrap()));
+            }
+        }
+    }
 }
-*/
+
