@@ -470,6 +470,7 @@ mod test_type_infer {
                 let d = (b + 1);
                 return (c + d);
             }
+            fn main() {}
         ",
         );
         println!("{}", ir::print_basic(&_ir));
@@ -485,6 +486,7 @@ mod test_type_infer {
                 print(c);
                 return (b + c);
             }
+            fn main() {}
             ",
         );
         println!("{}", ir::print_basic(&_ir));
