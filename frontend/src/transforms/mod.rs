@@ -171,6 +171,7 @@ impl Query for VarTypeQuery {
                 ir::ConstKind::String(_) => prim.string,
                 ir::ConstKind::IArray(_) => unimplemented!(),
             },
+            ir::OPKind::Let { value } => q.query(VarTypeQuery(*value)).unwrap()?,
             _ => panic!("Unexpected op kind"),
         };
         if let Some(var_ty) = ir.get(self.0).ty {
@@ -248,7 +249,7 @@ lazy_static! {
         },
         RTSFnProto {
             name: "__rts_new_string",
-            arg_tys: vec![ir::TypeKind::I32, ir::TypeKind::Ptr],
+            arg_tys: vec![ir::TypeKind::I32, ir::TypeKind::Ptr(None)],
             ret_ty: ir::TypeKind::String,
         },
         RTSFnProto {
@@ -489,6 +490,29 @@ mod test_type_infer {
             fn main() {}
             ",
         );
+        println!("{}", ir::print_basic(&_ir));
+    }
+
+    #[test]
+    fn test_methods() {
+        let src = "\
+        interface Foo {
+            fn foo(this, a: i32): Self
+        }
+        type B = { a: i32 }
+        class Bar for Foo(B) {
+            fn foo(this, a: i32): Self {
+                print(a);
+                this.a = (a + 1);
+                return this;
+            }
+        }
+        fn main() {
+            let b = Bar({a: 3});
+            
+        }
+        ";
+        let _ir = generate_ir_from_str(&src);
         println!("{}", ir::print_basic(&_ir));
     }
 }

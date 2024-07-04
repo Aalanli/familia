@@ -53,7 +53,6 @@ pub struct IRNamer {
     class_prefix_ids: HashMap<ClassID, String>,
     var_prefix: HashMap<VarID, String>,
     global_prefix: HashMap<GlobalConstID, String>,
-    cache: RefCell<HashMap<NodeID, Box<str>>>,
 }
 
 impl IRNamer {
@@ -79,7 +78,6 @@ impl IRNamer {
             global_prefix: Self::compute_id_name(ir, |id: GlobalConstID| {
                 ir.get(ir.get(id).var).name.get_str(ir).into()
             }),
-            cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -100,25 +98,8 @@ impl IRNamer {
         names
     }
 
-    fn cacher(&self, id: NodeID, f: impl FnOnce() -> String) -> &str {
-        if let Some(name) = self.cache.borrow().get(&id) {
-            return unsafe {
-                let name = &**name as *const str;
-                &*name
-            };
-        }
-        let name = f();
-        self.cache.borrow_mut().insert(id, Box::from(name.as_str()));
-        let b = self.cache.borrow();
-        let s = b.get(&id).unwrap();
-        unsafe {
-            let s = &**s as *const str;
-            &*s
-        }
-    }
-
     pub fn name_type_decl(&self, ty: TypeDeclID) -> &str {
-        self.cacher(ty.id(), || format!("{}", self.type_prefix_ids[&ty]))
+        self.type_prefix_ids[&ty].as_str()
     }
 
     pub fn try_name_type(&self, ty: TypeID) -> Option<&str> {
@@ -128,19 +109,19 @@ impl IRNamer {
     }
 
     pub fn name_var(&self, var: VarID) -> &str {
-        self.cacher(var.id(), || format!("{}", self.var_prefix[&var]))
+        self.var_prefix[&var].as_str()
     }
 
     pub fn name_func(&self, func: FuncID) -> &str {
-        self.cacher(func.id(), || format!("{}", self.fn_names[&func]))
+        self.fn_names[&func].as_str()
     }
 
     pub fn name_class(&self, class: ClassID) -> &str {
-        self.cacher(class.id(), || format!("{}", self.class_prefix_ids[&class]))
+        self.class_prefix_ids[&class].as_str()
     }
 
     pub fn name_global(&self, global: GlobalConstID) -> &str {
-        self.cacher(global.id(), || format!("{}", self.global_prefix[&global]))
+        self.global_prefix[&global].as_str()
     }
 }
 
@@ -175,8 +156,8 @@ impl<'ir> BasicPrinter<'ir> {
             TypeKind::Self_ => {
                 return format!("Self");
             }
-            TypeKind::Ptr => {
-                return format!("@ptr");
+            TypeKind::Ptr(tid) => {
+                return format!("@ptr{:?}", tid.map(|tid| self.print_type(tid)));
             }
             TypeKind::I32 => {
                 return "i32".to_string();
@@ -187,10 +168,22 @@ impl<'ir> BasicPrinter<'ir> {
             TypeKind::String => {
                 return "String".to_string();
             }
+            TypeKind::Fn(args, ret) => {
+                let args = arg_list(
+                    "(",
+                    ")",
+                    ", ",
+                    args.iter().map(|ty| self.print_type(*ty)),
+                );
+                return format!("fn{} -> {}", args, self.print_type(*ret));
+            }
         }
     }
 
     pub fn print_type(&self, ty: TypeID) -> String {
+        if let Some(decl) = self.ir_namer.try_name_type(ty) {
+            return decl.to_string();
+        }
         let ty = self.ir.get(ty);
         self.print_tykind(&ty.kind)
     }

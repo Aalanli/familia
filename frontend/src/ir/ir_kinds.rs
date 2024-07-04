@@ -301,7 +301,8 @@ pub enum TypeKind {
     This,
     Self_,
     Struct { fields: Vec<(SymbolID, TypeID)> },
-    Ptr,
+    Ptr(Option<TypeID>),
+    Fn(Vec<TypeID>, TypeID),
 }
 
 impl Default for TypeKind {
