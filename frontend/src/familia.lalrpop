@@ -40,8 +40,8 @@ DeclKind : DeclKind = {
         };
         kind
     },
-    "class" <name:Ident> <for_it:("for" <Path>)?> "{" <sub_decls:Decl*> "}" => {
-        DeclKind::ClassImpl { name, sub_decls, for_it }
+    "class" <name:Ident> <for_it:("for" <Path>)?> <repr_ty:("(" <Path> ")")?> "{" <sub_decls:Decl*> "}" => {
+        DeclKind::ClassImpl { name, sub_decls, for_it, repr_ty }
     },
     "interface" <name:Ident> "{" <sub_decls:Decl*> "}" => {
         DeclKind::InterfaceImpl { name, sub_decls }
@@ -78,7 +78,7 @@ pub Stmt : Stmt = {
 StmtKind: StmtKind = {
     "let" <v:Var> "=" <e:Expr> ";" => StmtKind::LetStmt { var:v, expr:e },
     <e:Expr> ";" => StmtKind::ExprStmt { expr:e },
-//    <lhs:UnTypedVar> "=" <rhs:Expr> ";" => StmtKind::AssignStmt { lhs, rhs },
+    <lhs:Expr> "=" <rhs:Expr> ";" => StmtKind::AssignStmt { lhs, rhs },
     "return" <expr:Expr> ";" => StmtKind::ReturnStmt { expr } 
 }
 
@@ -92,10 +92,12 @@ ExprKind: ExprKind = {
     <n:Int> => ExprKind::IntLit(n),
     <s:String> => ExprKind::StringLit(s),
     <v:Var> => ExprKind::Var(v),
+    <e:Expr> "." <a:Ident> "(" <args:Comma<Expr>> ")"  => ExprKind::MethodCall { exp: P(e), sym: a, args },
     <e:Expr> "." <a:Ident> => ExprKind::GetAttr { exp: P(e), sym: a },
     "(" <l:Expr> "+" <r:Expr> ")" => ExprKind::Add { lhs:P(l), rhs:P(r) },
     <c:Path> "(" <args:Comma<Expr>> ")" => ExprKind::Call { path:c, args },
     "{" <args:Comma<(<Ident> ":" <Expr>)>> "}" => ExprKind::Struct { args },
+    "(" <e:ExprKind> ")" => e
 }
 
 pub Type : Type = {

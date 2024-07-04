@@ -2,6 +2,31 @@ use std::{cell::RefCell, collections::HashMap};
 
 use super::*;
 
+/// Represents a block of text that can be printed.
+struct Doc {
+
+}
+
+impl Doc {
+    fn pop_head(&mut self) -> String {
+        unimplemented!()
+    }
+
+    fn push_head(&mut self, s: &str) {
+        unimplemented!()
+    }
+
+    fn pop_tail(&mut self) -> String {
+        unimplemented!()
+    }
+
+    fn push_tail(&mut self, s: &str) {
+        unimplemented!()
+    }
+}
+
+
+
 fn arg_list(head: &str, tail: &str, sep: &str, args: impl Iterator<Item = String>) -> String {
     let args = args.collect::<Vec<_>>();
     let mut head = head.to_string();
@@ -205,6 +230,13 @@ impl<'ir> BasicPrinter<'ir> {
         let args;
         let name;
         match &op.kind {
+            OPKind::Let { value } => {
+                return format!(
+                    "{} = let {}",
+                    self.print_var(op.res.unwrap()),
+                    self.print_var(*value)
+                );
+            }
             OPKind::Assign { lhs, rhs } => {
                 args = vec![*lhs, *rhs];
                 name = "assign";
@@ -225,6 +257,28 @@ impl<'ir> BasicPrinter<'ir> {
                     "{} = call @{}{}",
                     self.print_var(op.res.unwrap()),
                     self.ir_namer.name_func(*func),
+                    arg_list(
+                        "(",
+                        ")",
+                        ", ",
+                        args.iter().map(|var| { self.print_var(*var) })
+                    )
+                );
+            }
+            OPKind::ClsCtor { cls, arg } => {
+                return format!(
+                    "{} = cls_ctor @{}({})",
+                    self.print_var(op.res.unwrap()),
+                    self.ir_namer.name_class(*cls),
+                    self.print_var(*arg)
+                );
+            }
+            OPKind::MethodCall { obj, method, args } => {
+                return format!(
+                    "{} = call @{}{}{}",
+                    self.print_var(op.res.unwrap()),
+                    self.print_var(*obj),
+                    method.get_str(self.ir),
                     arg_list(
                         "(",
                         ")",
@@ -308,6 +362,11 @@ impl<'ir> BasicPrinter<'ir> {
     pub fn print_class(&self, class_id: ClassID) -> String {
         let class = self.ir.get(class_id);
         let mut str = format!("class @{}", self.ir_namer.name_class(class_id));
+        if let Some(ty) = class.repr_type {
+            str += "(";
+            str += &self.print_type(ty);
+            str += ")";
+        }
         str += " {\n";
         for methods in class.methods.iter() {
             str += " ";

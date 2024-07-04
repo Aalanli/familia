@@ -339,10 +339,18 @@ pub struct OP {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OPKind {
+    Let {
+        value: VarID,
+    },
     GetAttr {
         obj: VarID,
         attr: SymbolID,
         idx: Option<usize>,
+    },
+    MethodCall {
+        obj: VarID,
+        method: SymbolID,
+        args: Vec<VarID>,
     },
     Call {
         // path: PathID,
@@ -355,6 +363,10 @@ pub enum OPKind {
     },
     Struct {
         fields: Vec<(SymbolID, VarID)>,
+    },
+    ClsCtor {
+        cls: ClassID,
+        arg: VarID,
     },
     Return {
         value: VarID,
@@ -388,6 +400,7 @@ pub struct ClassImpl {
     pub name: SymbolID,
     pub methods: Vec<FuncID>,
     pub types: Vec<TypeDeclID>,
+    pub repr_type: Option<TypeID>,
     pub for_itf: Option<InterfaceID>,
 }
 

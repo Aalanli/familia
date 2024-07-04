@@ -75,6 +75,7 @@ pub enum DeclKind {
     ClassImpl {
         name: Ident,
         for_it: Option<Path>,
+        repr_ty: Option<Path>,
         sub_decls: Vec<Decl>,
     },
     InterfaceImpl {
@@ -151,7 +152,7 @@ pub struct Stmt {
 pub enum StmtKind {
     LetStmt { var: Var, expr: Expr },
     ExprStmt { expr: Expr },
-    // AssignStmt { lhs: Var, rhs: Expr },
+    AssignStmt { lhs: Expr, rhs: Expr },
     ReturnStmt { expr: Expr },
 }
 
@@ -166,6 +167,7 @@ pub enum ExprKind {
     Var(Var),
     IntLit(i32),
     StringLit(String),
+    MethodCall { exp: P<Expr>, sym: Ident, args: Vec<Expr> },
     GetAttr { exp: P<Expr>, sym: Ident },
     Add { lhs: P<Expr>, rhs: P<Expr> },
     Call { path: Path, args: Vec<Expr> },
@@ -240,9 +242,15 @@ pub fn default_visit_decl<'a>(decl: &'a Decl, visitor: &mut impl Visitor<'a>) {
                 visitor.visit_stmt(stmt);
             }
         }
-        DeclKind::ClassImpl { sub_decls, .. } => {
+        DeclKind::ClassImpl { sub_decls, for_it, repr_ty, .. } => {
             for sub_decl in sub_decls {
                 visitor.visit_decl(sub_decl);
+            }
+            if let Some(for_it) = for_it {
+                visitor.visit_path(for_it);
+            }
+            if let Some(repr_ty) = repr_ty {
+                visitor.visit_path(repr_ty);
             }
         }
         DeclKind::InterfaceImpl {
@@ -304,6 +312,12 @@ pub fn default_visit_expr<'a>(expr: &'a Expr, visitor: &mut impl Visitor<'a>) {
             }
             visitor.visit_path(path);
         }
+        ExprKind::MethodCall { exp, args, .. } => {
+            visitor.visit_expr(exp);
+            for arg in args {
+                visitor.visit_expr(arg);
+            }
+        }
         ExprKind::Struct { args } => {
             for (_, arg) in args {
                 visitor.visit_expr(arg);
@@ -323,6 +337,10 @@ pub fn default_visit_stmt<'a>(stmt: &'a Stmt, visitor: &mut impl Visitor<'a>) {
         }
         StmtKind::ReturnStmt { expr } => {
             visitor.visit_expr(expr);
+        }
+        StmtKind::AssignStmt { lhs, rhs } => {
+            visitor.visit_expr(lhs);
+            visitor.visit_expr(rhs);
         }
     }
 }
