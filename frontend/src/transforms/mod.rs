@@ -100,6 +100,36 @@ impl Query for GetAttrIdxQuery {
     }
 }
 
+fn get_fn_type(ir: &ir::IR, fdecl: &ir::FuncDecl) -> ir::TypeID {
+    let args = fdecl
+        .args
+        .iter()
+        .map(|(_, ty)| *ty)
+        .collect::<Vec<_>>();
+    let ret_ty = fdecl.ret_ty;
+    ir::TypeID::insert(ir, ir::TypeKind::Fn(args, ret_ty))
+}
+
+fn has_itf_repr_ty(ir: &ir::IR, itf: ir::InterfaceID) -> bool {
+    let itf = ir.get(itf);
+    let this = ir::TypeID::this(ir);
+    for fdecl in itf.methods.iter() {
+        if fdecl.ret_ty == this || fdecl.args[1..].iter().any(|(_, ty)| *ty == this) {
+            return false;
+        }
+        if fdecl.args.get(0).map(|(_, ty)| *ty) != Some(this) {
+            return false;
+        }
+    }
+    return true;
+}
+
+fn has_cls_repr_ty(ir: &ir::IR, cls: ir::ClassID) -> bool {
+    let cls = ir.get(cls);
+    cls.for_itf.map(|itf| has_itf_repr_ty(ir, itf)).unwrap_or(false)
+}
+
+
 impl Query for VarTypeQuery {
     type Result = PResult<ir::TypeID>;
 
@@ -137,7 +167,7 @@ impl Query for VarTypeQuery {
             }
             ir::OPKind::GetAttr { obj, attr, .. } => {
                 let ty = q.query(VarTypeQuery(*obj)).unwrap()?;
-                let mut struct_ty = ir.get(ty);
+                let struct_ty = ir.get(ty);
                 // assume no cycle
 
                 if let ir::TypeKind::Struct { fields } = &struct_ty.kind {
@@ -172,6 +202,63 @@ impl Query for VarTypeQuery {
                 ir::ConstKind::IArray(_) => unimplemented!(),
             },
             ir::OPKind::Let { value } => q.query(VarTypeQuery(*value)).unwrap()?,
+            &ir::OPKind::ClsCtor { cls, arg } => {
+                let impl_cls = ir.get(cls);
+                if impl_cls.for_itf.is_none() {
+                    return Err(ProgramError {
+                        span: Some(op.span),
+                        error_message: "No representation type, missing \"for\" clause",
+                        ..Default::default()
+                    });
+                }
+                if !has_cls_repr_ty(ir, cls) {
+                    return Err(ProgramError {
+                        span: Some(op.span),
+                        error_message: "No representation type for the interface",
+                        ..Default::default()
+                    });
+                }
+
+                let itf = impl_cls.for_itf.unwrap();
+                ir::TypeID::insert(ir, ir::TypeKind::Itf(itf))
+            }
+            ir::OPKind::MethodCall { obj, method, args } => {
+                let tyid = q.query(VarTypeQuery(*obj)).unwrap()?;
+                let obj_ty = ir.get(tyid);
+                match &obj_ty.kind {
+                    ir::TypeKind::Itf(itf) => {
+                        let itf = ir.get(*itf);
+                        let method = itf.methods.iter().find(|f| f.name == *method);
+                        if method.is_none() {
+                            return Err(ProgramError {
+                                span: Some(op.span),
+                                error_message: "Invalid method call",
+                                ..Default::default()
+                            });
+                        }
+                        let method = method.unwrap();
+                        if method.args.len() - 1 != args.len() || !method.args[1..].iter().zip(args.iter()).all(|(a, b)| {
+                            let ty = q.query(VarTypeQuery(*b)).unwrap().unwrap();
+                            ty == a.1
+                        }) {
+                            return Err(ProgramError {
+                                span: Some(op.span),
+                                error_message: "Type mismatch",
+                                ..Default::default()
+                            });
+                        }
+
+                        return Ok(method.ret_ty);
+                    }
+                    _ => {
+                        return Err(ProgramError {
+                            span: Some(op.span),
+                            error_message: "Expected interface type",
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
             _ => panic!("Unexpected op kind"),
         };
         if let Some(var_ty) = ir.get(self.0).ty {
@@ -185,6 +272,56 @@ impl Query for VarTypeQuery {
         }
         Ok(ty)
     }
+}
+
+fn subsititute_cls_repr_type(ir: &mut ir::IR) -> PhaseResult<()> {
+    let this = ir::TypeID::this(ir);
+    let self_ = ir::TypeID::self_(ir);
+    let src = ir.get_global::<ir::ModuleID>().unwrap();
+    let src = ir.get(*src).src.clone().unwrap();
+    let mut need_remap = vec![];
+    for id in ir.iter::<ir::ClassID>() {
+        let cls = ir.get(id);
+        let new_this_ty = cls.repr_type.unwrap_or_else(|| {
+            ir::TypeID::void(ir)
+        });
+
+        let itf_ty = cls.for_itf.map(|itf| {
+            ir::TypeID::insert(ir, ir::TypeKind::Itf(itf))
+        });
+        
+        let has_repr = has_cls_repr_ty(ir, id);
+        for f in cls.methods.iter() {
+            let f = ir.get(*f);
+            for v in f.vars.iter() {
+                need_remap.push(*v);
+            }
+            for op in f.body.iter() {
+                for v in ir.get(*op).res() {
+                    need_remap.push(v);
+                }
+            }
+        }
+
+        for v in need_remap.iter() {
+            let var = ir.get_mut(*v);
+            let Some(ty) = var.ty.as_mut() else { continue };
+            if *ty == this {
+                *ty = new_this_ty;
+            } else if *ty == self_ {
+                if has_repr {
+                    *ty = itf_ty.unwrap();
+                } else {
+                    src.add_err(ProgramError {
+                        span: var.span,
+                        error_message: "Self is not allowed, no representation type",
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+    }
+    src.commit_error(())
 }
 
 fn rewrite_var_types<'s>(ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<()> {
@@ -223,9 +360,10 @@ fn rewrite_var_types<'s>(ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<()>
 pub fn transform_ir<'s>(ir: &mut ir::IR) -> PhaseResult<()> {
     let module = ir.get_global::<ir::ModuleID>().unwrap();
     let src = ir.get(*module).src.clone().unwrap();
+    subsititute_cls_repr_type(ir)?;
     rewrite_var_types(ir, &src)?;
     insert_rts_fns(ir);
-    lower_to_rts(ir);
+    lower_to_rts(ir)?;
     Ok(())
 }
 
@@ -343,9 +481,11 @@ fn add_gc_mark_root(
 
 fn add_gc_ty_attrs(ir: &mut ir::IR) {}
 
-fn lower_to_rts(ir: &mut ir::IR) {
+fn lower_to_rts(ir: &mut ir::IR) -> PhaseResult<()> {
     let prim = ir.get_global::<PrimitiveRegistry>().unwrap().clone();
     let rts = ir.get_global::<RTSRegistry>().unwrap();
+    let src = ir.get_global::<ir::ModuleID>().unwrap();
+    let src = ir.get(*src).src.clone().unwrap();
     let mut op_remap = HashMap::new();
     for fs in ir.iter::<ir::FuncID>() {
         let f = ir.get(fs);
@@ -372,7 +512,14 @@ fn lower_to_rts(ir: &mut ir::IR) {
                 }
                 ir::OPKind::Call { func, args } => {
                     if *func == prim.fns["print"] {
-                        assert!(args.len() == 1 && ir.get(args[0]).ty.unwrap() == prim.string);
+                        if !(args.len() == 1 && ir.get(args[0]).ty.unwrap() == prim.string) {
+                            src.add_err(ProgramError {
+                                span: Some(op.span),
+                                error_message: "Invalid print",
+                                ..Default::default()
+                            });
+                            continue;
+                        }
                         let op_kind = ir::OPKind::Call {
                             func: rts.fns["__rts_string_print"],
                             args: args.clone(),
@@ -409,6 +556,8 @@ fn lower_to_rts(ir: &mut ir::IR) {
     }
     ir.delete(prim.fns["print"]);
     ir.delete(prim.fns["to_str"]);
+
+    src.commit_error(())
 }
 
 #[cfg(test)]
@@ -502,14 +651,14 @@ mod test_type_infer {
         type B = { a: i32 }
         class Bar for Foo(B) {
             fn foo(this, a: i32): Self {
-                print(a);
+                print(to_str(a));
                 this.a = (a + 1);
                 return this;
             }
         }
         fn main() {
             let b = Bar({a: 3});
-            
+            b.foo(1);
         }
         ";
         let _ir = generate_ir_from_str(&src);

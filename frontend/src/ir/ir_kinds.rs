@@ -265,6 +265,18 @@ impl TypeID {
     pub fn insert(ir: &IR, kind: TypeKind) -> TypeID {
         ir.insert(Type { kind })
     }
+
+    pub fn void(ir: &IR) -> TypeID {
+        TypeID::insert(ir, TypeKind::Void)
+    }
+
+    pub fn this(ir: &IR) -> TypeID {
+        TypeID::insert(ir, TypeKind::This)
+    }
+
+    pub fn self_(ir: &IR) -> TypeID {
+        TypeID::insert(ir, TypeKind::Self_)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -303,6 +315,7 @@ pub enum TypeKind {
     Struct { fields: Vec<(SymbolID, TypeID)> },
     Ptr(Option<TypeID>),
     Fn(Vec<TypeID>, TypeID),
+    Itf(InterfaceID),
 }
 
 impl Default for TypeKind {
@@ -323,8 +336,8 @@ impl_id!(FuncID, FuncImpl, false);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FuncImpl {
-    pub decl: FuncDecl,
-    pub vars: Vec<VarID>,
+    pub decl: FuncDecl, // signature includes the original This type
+    pub vars: Vec<VarID>, // remap This/Self to reflect concrete type
     pub body: Vec<OPID>,
     pub builtin: bool,
 }
@@ -377,6 +390,31 @@ pub enum OPKind {
         lhs: VarID,
         rhs: VarID,
     },
+}
+
+impl OP {
+    pub fn args(&self) -> Vec<VarID> {
+        match &self.kind {
+            OPKind::Let { value } => vec![*value],
+            OPKind::GetAttr { obj, .. } => vec![*obj],
+            OPKind::MethodCall { obj, args, .. } => {
+                let mut res = vec![*obj];
+                res.extend(args.iter().copied());
+                res
+            }
+            OPKind::Call { args, .. } => args.clone(),
+            OPKind::Add { lhs, rhs } => vec![*lhs, *rhs],
+            OPKind::Struct { fields } => fields.iter().map(|(_, v)| *v).collect(),
+            OPKind::ClsCtor { arg, .. } => vec![*arg],
+            OPKind::Return { value } => vec![*value],
+            OPKind::Constant(_) => vec![],
+            OPKind::Assign { lhs, rhs } => vec![*lhs, *rhs],
+        }
+    }
+
+    pub fn res(&self) -> Vec<VarID> {
+        self.res.into_iter().collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

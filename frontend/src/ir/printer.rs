@@ -51,6 +51,7 @@ pub struct IRNamer {
     type_prefix_ids: HashMap<TypeDeclID, String>,
     type_decl_tys: HashMap<TypeID, TypeDeclID>,
     class_prefix_ids: HashMap<ClassID, String>,
+    itf_prefix_ids: HashMap<InterfaceID, String>,
     var_prefix: HashMap<VarID, String>,
     global_prefix: HashMap<GlobalConstID, String>,
 }
@@ -72,6 +73,9 @@ impl IRNamer {
                 })
                 .collect::<HashMap<_, _>>(),
             class_prefix_ids: Self::compute_id_name(ir, |id: ClassID| {
+                ir.get(id).name.get_str(ir).into()
+            }),
+            itf_prefix_ids: Self::compute_id_name(ir, |id: InterfaceID| {
                 ir.get(id).name.get_str(ir).into()
             }),
             var_prefix: Self::compute_id_name(ir, |id: VarID| ir.get(id).name.get_str(ir).into()),
@@ -118,6 +122,10 @@ impl IRNamer {
 
     pub fn name_class(&self, class: ClassID) -> &str {
         self.class_prefix_ids[&class].as_str()
+    }
+
+    pub fn name_interface(&self, itf: InterfaceID) -> &str {
+        self.itf_prefix_ids[&itf].as_str()
     }
 
     pub fn name_global(&self, global: GlobalConstID) -> &str {
@@ -177,12 +185,15 @@ impl<'ir> BasicPrinter<'ir> {
                 );
                 return format!("fn{} -> {}", args, self.print_type(*ret));
             }
+            TypeKind::Itf(itf) => {
+                return format!("Itf @{}", self.ir_namer.name_interface(*itf));
+            }
         }
     }
 
     pub fn print_type(&self, ty: TypeID) -> String {
         if let Some(decl) = self.ir_namer.try_name_type(ty) {
-            return decl.to_string();
+            return format!("@{}", decl);
         }
         let ty = self.ir.get(ty);
         self.print_tykind(&ty.kind)
@@ -190,7 +201,8 @@ impl<'ir> BasicPrinter<'ir> {
 
     pub fn print_type_decl(&self, ty_id: TypeDeclID) -> String {
         let ty = self.ir.get(ty_id);
-        let decl = self.print_type(ty.decl);
+        let ty = self.ir.get(ty.decl);
+        let decl = self.print_tykind(&ty.kind);
         format!("type @{} = {}", self.ir_namer.name_type_decl(ty_id), decl)
     }
 

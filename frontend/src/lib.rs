@@ -17,8 +17,8 @@ pub type PhaseResult<T> = Result<T, PhaseError>;
 pub struct ModSource {
     text: Rc<String>,
     file: Option<Rc<String>>,
-    errors: RefCell<Vec<error::ProgramError>>,
-    inserted_errors: RefCell<HashSet<error::ProgramError>>,
+    errors: Rc<RefCell<Vec<error::ProgramError>>>,
+    inserted_errors: Rc<RefCell<HashSet<error::ProgramError>>>,
 }
 
 impl Hash for ModSource {
@@ -33,8 +33,8 @@ impl ModSource {
         ModSource {
             file: file.map(Rc::new),
             text: Rc::new(text),
-            errors: RefCell::new(Vec::new()),
-            inserted_errors: RefCell::new(HashSet::new()),
+            errors: Rc::new(RefCell::new(Vec::new())),
+            inserted_errors: Rc::new(RefCell::new(HashSet::new())),
         }
     }
 
