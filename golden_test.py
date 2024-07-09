@@ -42,13 +42,21 @@ def main(generate=False):
     for f in test_files:
         print(f)
         golden_llvm = f.replace('.fm', '.ll')
+        golden_llvm_o1 = f.replace('.fm', '_O1.ll')
         golden_ir = f.replace('.fm', '.ir')
         if generate:
             subprocess.run(['./target/debug/familia', '-o', golden_llvm, 'dump-llvm', f])
+            subprocess.run(['./target/debug/familia', '-o', golden_llvm_o1, 'dump-llvm', f, 'o1'])
             subprocess.run(['./target/debug/familia', '-o', golden_ir, 'dump-ir', f])
         else:
             s = subprocess.run(['./target/debug/familia', 'dump-llvm', f], stdout=subprocess.PIPE).stdout
             with open(golden_llvm, 'r') as fl:
+                golden = fl.read()
+            if not diff_str(s.decode('utf-8')[:-1], golden):
+                print('LLVM mismatch')
+                sys.exit(1)
+            s = subprocess.run(['./target/debug/familia', 'dump-llvm', f, 'o1'], stdout=subprocess.PIPE).stdout
+            with open(golden_llvm_o1, 'r') as fl:
                 golden = fl.read()
             if not diff_str(s.decode('utf-8')[:-1], golden):
                 print('LLVM mismatch')

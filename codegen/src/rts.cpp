@@ -69,7 +69,7 @@ void __rts_gc_destroy() {
 }
 
 AllocPtr* __rts_gc_alloc(TraceConfig* config, int bytes) {
-    AllocPtr* node = (AllocPtr*) malloc(offsetof(AllocPtr, data[bytes]));
+    AllocPtr* node = (AllocPtr*) malloc(16 + bytes);
     node->config = config;
     node->len = (u_int64_t) bytes;
     gc->nodes.insert(node);

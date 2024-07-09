@@ -1,9 +1,12 @@
+use std::borrow::{Borrow, BorrowMut};
 use std::collections::HashMap;
+use std::io::Write;
 use std::ops::Deref;
 
 use familia_frontend::transforms::RTSRegistry;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
+use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{
     BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType,
@@ -19,6 +22,33 @@ use familia_frontend as frontend;
 use familia_frontend::ir;
 use frontend::transforms::PrimitiveRegistry;
 use ir::IR;
+
+macro_rules! include_cstr {
+    ( $path:literal $(,)? ) => {{
+        // Use a constant to force the verification to run at compile time.
+        const VALUE: &'static ::core::ffi::CStr =
+            match ::core::ffi::CStr::from_bytes_with_nul(concat!(include_str!($path), "\0").as_bytes()) {
+                Ok(value) => value,
+                Err(_) => panic!(concat!("interior NUL byte(s) in `", $path, "`")),
+            };
+        VALUE
+    }};
+}
+
+const RTS_LL: &'static ::core::ffi::CStr = include_cstr!("rts.ll");
+
+
+fn add_rts(context: &Context) -> Module {
+    let buf = MemoryBuffer::create_from_memory_range(RTS_LL.to_bytes(), "rts_ll");
+    context.create_module_from_ir(buf).unwrap()
+}
+
+#[test]
+fn test_add_rts() {
+    let context = Context::create();
+    add_rts(&context);
+}
+
 
 struct IRState<'ir> {
     ir: &'ir IR,
@@ -568,7 +598,7 @@ use inkwell::{
     targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine},
 };
 
-fn run_passes_on(module: &Module) {
+fn get_target_machine() -> TargetMachine {
     Target::initialize_all(&InitializationConfig::default());
     let target_triple = TargetMachine::get_default_triple();
     let target = Target::from_triple(&target_triple).unwrap();
@@ -582,7 +612,11 @@ fn run_passes_on(module: &Module) {
             CodeModel::Default,
         )
         .unwrap();
+    target_machine
+}
 
+fn run_passes_on(module: &Module) {
+    let target_machine = get_target_machine();
     let passes: &[&str] = &[
         // "instcombine",
         // "reassociate",
@@ -600,11 +634,14 @@ fn run_passes_on(module: &Module) {
             PassBuilderOptions::create(),
         )
         .unwrap();
+}
 
-    // let t = target_machine
-    //     .write_to_memory_buffer(module, inkwell::targets::FileType::Assembly)
-    //     .unwrap();
-    // println!("{}", String::from_utf8(t.as_slice().to_vec()).unwrap());
+fn get_obj<W: Write>(module: &Module, w: &mut W) {
+    let target_machine = get_target_machine();
+    let t = target_machine
+        .write_to_memory_buffer(module, inkwell::targets::FileType::Object)
+        .unwrap();
+    w.write_all(t.as_slice()).unwrap();
 }
 
 pub enum OptLevel {
@@ -618,7 +655,14 @@ impl Default for OptLevel {
     }
 }
 
-pub fn generate_llvm(ir: &ir::IR, opt_level: OptLevel) -> Result<String> {
+pub struct CodeGenOptions<'a> {
+    pub opt_level: OptLevel,
+    pub add_rts: bool,
+    pub write_obj: bool, // otherwise dump the string
+    pub output: &'a mut dyn Write,
+}
+
+pub fn generate_llvm(ir: &ir::IR, options: &mut CodeGenOptions) {
     let context = Context::create();
     let module = context.create_module("main");
 
@@ -631,17 +675,43 @@ pub fn generate_llvm(ir: &ir::IR, opt_level: OptLevel) -> Result<String> {
     initialize_codegen(&mut codegen, &ir_state);
     codegen_fn(&mut codegen, &ir_state);
 
-    if let OptLevel::O1 = opt_level {
+    if options.add_rts {
+        let rts = add_rts(&context);
+        codegen.module.link_in_module(rts).unwrap();
+    }
+    
+    if let OptLevel::O1 = options.opt_level {
         run_passes_on(&codegen.module);
     }
 
-    Ok(codegen.module.to_string())
+    if options.write_obj {
+        get_obj(&codegen.module, &mut options.output);
+    } else {
+        options.output.write_all(codegen.module.print_to_string().to_bytes()).unwrap();
+    }
 }
+
+
+pub fn dump_llvm(ir: &ir::IR, opt_level: OptLevel) -> String {
+    let mut str = vec![];
+    let mut options = CodeGenOptions {
+        opt_level,
+        add_rts: false,
+        write_obj: false,
+        output: &mut str,
+    };
+    
+    generate_llvm(ir, &mut options);    
+    String::from_utf8(str).unwrap()
+}
+
 
 #[cfg(test)]
 mod tests {
     use inkwell::llvm_sys::core;
+    use inkwell::types::{AsTypeRef, PointerType};
     use inkwell::AddressSpace;
+    use super::*;
     fn make_pointer_type<'a>(ty: BasicTypeEnum<'a>) -> PointerType<'a> {
         unsafe {
             let ptr_ty = core::LLVMPointerType(ty.as_type_ref(), 0);
@@ -649,7 +719,7 @@ mod tests {
         }
     }
 
-    use super::*;
+
     #[test]
     fn test_struct() {
         let context = Context::create();
@@ -901,7 +971,7 @@ mod tests {
 
         println!("{}", ir::print_basic(&ir));
 
-        let llvm = generate_llvm(&ir, Default::default()).unwrap();
+        let llvm = dump_llvm(&ir, OptLevel::None);
         println!("{}", llvm);
     }
 
@@ -921,7 +991,7 @@ mod tests {
         );
         println!("{}", ir::print_basic(&ir));
 
-        let llvm = generate_llvm(&ir, Default::default()).unwrap();
+        let llvm = dump_llvm(&ir, OptLevel::None);
         println!("{}", llvm);
     }
 
@@ -949,7 +1019,7 @@ mod tests {
         ",
         );
         println!("{}", ir::print_basic(&ir));
-        let llvm = generate_llvm(&ir, Default::default()).unwrap();
+        let llvm = dump_llvm(&ir, OptLevel::None);
         println!("{}", llvm);
     }
 
@@ -970,7 +1040,7 @@ mod tests {
             ",
         );
         println!("{}", ir::print_basic(&ir));
-        let llvm = generate_llvm(&ir, Default::default()).unwrap();
+        let llvm = dump_llvm(&ir, OptLevel::None);
         println!("{}", llvm);
     }
 
@@ -1007,7 +1077,7 @@ mod tests {
             ",
         );
         println!("{}", ir::print_basic(&ir));
-        let llvm = generate_llvm(&ir, OptLevel::O1).unwrap();
+        let llvm = dump_llvm(&ir, OptLevel::None);
         println!("{}", llvm);
     }
 }

@@ -1,0 +1,18 @@
+interface Foo {
+    fn say_hello(this)
+}
+
+class Bar for Foo(()) {
+    fn say_hello(this) {
+        print("Hello, world!\n");
+    }
+}
+
+fn foo(a: Foo) {
+    a.say_hello();
+}
+
+fn main() {
+    let b = Bar();
+    foo(b);
+}

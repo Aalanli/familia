@@ -5,5 +5,5 @@ fn bar(a: i32, b: i32): i32 {
 }
 
 fn main() {
-    (to_str(1));
+    print(to_str(1));
 }

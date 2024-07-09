@@ -45,6 +45,8 @@ entry:
   %call = call ptr @__rts_int_to_string(i32 %0)
   %"2" = alloca ptr, align 8
   store ptr %call, ptr %"2", align 8
+  %1 = load ptr, ptr %"2", align 8
+  call void @__rts_string_print(ptr %1)
   call void @__rts_gc_destroy()
   ret void
 }
@@ -52,5 +54,7 @@ entry:
 declare void @__rts_gc_init()
 
 declare ptr @__rts_int_to_string(i32)
+
+declare void @__rts_string_print(ptr)
 
 declare void @__rts_gc_destroy()
