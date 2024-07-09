@@ -730,7 +730,8 @@ fn visit_expr(
                         get_builtin_fn(path, &state.ir)
                     });
                 let func_ret = state.ir.get(func_id).decl.ret_ty;
-                let var = ir::VarID::new_var(&state.ir, parent_name, Some(func_ret), Some(expr.span));
+                let var =
+                    ir::VarID::new_var(&state.ir, parent_name, Some(func_ret), Some(expr.span));
                 let id = state.ir.temporary_id();
                 state.ir.insert_with(
                     id,
@@ -745,7 +746,7 @@ fn visit_expr(
                 );
                 ops.push(id);
                 return var;
-            } 
+            }
             let decl = state.path_map.get(path).unwrap();
             if decl.kind.is_class_impl() {
                 let class_id = state
@@ -760,16 +761,14 @@ fn visit_expr(
                     .unwrap();
                 assert!(var_ids.len() == 1);
                 let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
-                let op = state.ir.insert(
-                    ir::OP {
-                        kind: ir::OPKind::ClsCtor {
-                            cls: class_id,
-                            arg: var_ids[0],
-                        },
-                        span: expr.span,
-                        res: Some(var),
+                let op = state.ir.insert(ir::OP {
+                    kind: ir::OPKind::ClsCtor {
+                        cls: class_id,
+                        arg: var_ids[0],
                     },
-                );
+                    span: expr.span,
+                    res: Some(var),
+                });
                 ops.push(op);
                 return var;
             } else {
@@ -862,7 +861,6 @@ fn insert_stmts(
                 lhs: lhs_id,
                 rhs: rhs_id,
             };
-        
         }
     }
     let op_id = state.ir.insert(ir::OP {
@@ -902,12 +900,14 @@ fn visit_class_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Opt
         name,
         for_it,
         sub_decls,
-        repr_ty, 
+        repr_ty,
     } = &decl.kind
-    {   
+    {
         let repr_type = if let Some(repr) = repr_ty {
             Some(path_to_type(state, repr)?)
-        } else { None };
+        } else {
+            None
+        };
 
         let mut methods = vec![];
         let mut types = vec![];
@@ -1011,8 +1011,6 @@ fn visit_interface_impl<'a>(
     }
 }
 
-
-
 #[cfg(test)]
 mod ast_to_ir_test {
     use super::*;
@@ -1075,16 +1073,17 @@ mod ast_to_ir_test {
     #[test]
     fn test_type_cycle() {
         let src = [
-        "\
+            "\
         type A = {a: B}
         type B = {a: C, b: C}
         type C = {a: A}",
-        "\
+            "\
         type A = {a: A}",
-        "\
+            "\
         type A = {a: B}
         type B = {a: C}
-        type C = {a: B}"];
+        type C = {a: B}",
+        ];
         for src in src {
             let src = src.into();
             let ast = parse(&src).unwrap();
@@ -1108,7 +1107,8 @@ mod ast_to_ir_test {
         }
         fn main() {
         }
-        ".into();
+        "
+        .into();
         let ast = parse(&src);
         if let Err(e) = ast {
             println!("{}", e);
@@ -1142,7 +1142,8 @@ mod ast_to_ir_test {
             let b = Bar({a: 3});
             
         }
-        ".into();
+        "
+        .into();
         let ast = parse(&src);
         if let Err(e) = ast {
             println!("{}", e);
@@ -1158,4 +1159,3 @@ mod ast_to_ir_test {
         }
     }
 }
-

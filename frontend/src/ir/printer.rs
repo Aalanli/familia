@@ -3,9 +3,7 @@ use std::{cell::RefCell, collections::HashMap};
 use super::*;
 
 /// Represents a block of text that can be printed.
-struct Doc {
-
-}
+struct Doc {}
 
 impl Doc {
     fn pop_head(&mut self) -> String {
@@ -24,8 +22,6 @@ impl Doc {
         unimplemented!()
     }
 }
-
-
 
 fn arg_list(head: &str, tail: &str, sep: &str, args: impl Iterator<Item = String>) -> String {
     let args = args.collect::<Vec<_>>();
@@ -177,12 +173,7 @@ impl<'ir> BasicPrinter<'ir> {
                 return "String".to_string();
             }
             TypeKind::Fn(args, ret) => {
-                let args = arg_list(
-                    "(",
-                    ")",
-                    ", ",
-                    args.iter().map(|ty| self.print_type(*ty)),
-                );
+                let args = arg_list("(", ")", ", ", args.iter().map(|ty| self.print_type(*ty)));
                 return format!("fn{} -> {}", args, self.print_type(*ret));
             }
             TypeKind::Itf(itf) => {

@@ -1,16 +1,22 @@
 use std::collections::HashMap;
+use std::ops::Deref;
 
 use inkwell::builder::Builder;
 use inkwell::context::Context;
-use inkwell::module::Module;
-use inkwell::types::{AsTypeRef, BasicType, BasicTypeEnum, PointerType};
-use inkwell::values::{BasicValueEnum, PointerValue};
+use inkwell::module::{Linkage, Module};
+use inkwell::types::{
+    AsTypeRef, BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType, PointerType,
+    StructType,
+};
+use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::{AddressSpace, OptimizationLevel};
 
 use anyhow::Result;
+use either::Either;
 
 use familia_frontend as frontend;
 use familia_frontend::ir;
+use frontend::transforms::PrimitiveRegistry;
 use ir::IR;
 
 struct IRState<'ir> {
@@ -18,33 +24,144 @@ struct IRState<'ir> {
     namer: ir::IRNamer,
 }
 
+impl<'ir> IRState<'ir> {
+    pub fn namer(&self) -> &ir::IRNamer {
+        &self.namer
+    }
+}
+
+impl Deref for IRState<'_> {
+    type Target = IR;
+
+    fn deref(&self) -> &Self::Target {
+        self.ir
+    }
+}
+
 struct CodeGenState<'ctx> {
     context: &'ctx Context,
     module: Module<'ctx>,
     builder: Builder<'ctx>,
     var_ids: HashMap<ir::VarID, PointerValue<'ctx>>,
-    types: HashMap<ir::TypeID, BasicTypeEnum<'ctx>>,
+    repr_types: HashMap<ir::TypeID, BasicTypeEnum<'ctx>>,
+    struct_types: HashMap<ir::TypeID, Option<StructType<'ctx>>>,
+    vtables: HashMap<ir::ClassID, PointerValue<'ctx>>,
+    functions: HashMap<ir::FuncID, FunctionValue<'ctx>>,
+    value_types: HashMap<ir::TypeID, BasicTypeEnum<'ctx>>,
 }
 
 impl<'ctx> CodeGenState<'ctx> {
-    fn new_stack_var<'ir>(&mut self, ir: &IRState<'ir>, var: ir::VarID) -> PointerValue<'ctx> {
+    fn new(context: &'ctx Context, module: Module<'ctx>) -> Self {
+        let builder = context.create_builder();
+        CodeGenState {
+            context,
+            module,
+            builder,
+            var_ids: HashMap::new(),
+            repr_types: HashMap::new(),
+            struct_types: HashMap::new(),
+            vtables: HashMap::new(),
+            functions: HashMap::new(),
+            value_types: HashMap::new(),
+        }
+    }
+
+    fn get_fn_val<'ir>(&mut self, ir: &IRState<'ir>, func: ir::FuncID) -> FunctionValue<'ctx> {
+        if self.functions.contains_key(&func) {
+            return self.functions[&func];
+        }
+        let fn_type = get_fn_type(self, ir, func);
+        let llvm_func = self
+            .module
+            .add_function(&ir.namer.name_func(func), fn_type, None);
+        self.functions.insert(func, llvm_func);
+        llvm_func
+    }
+
+    fn build_vtable<'ir>(&mut self, ir: &IRState<'ir>, cls: ir::ClassID) -> PointerValue<'ctx> {
+        if !self.vtables.contains_key(&cls) {
+            let itf = ir.get(cls).for_itf.unwrap();
+            let mut methods = vec![];
+            let cls_impl = ir.get(cls);
+            for method in ir.get(itf).methods.iter() {
+                let cls_fn = *cls_impl
+                    .methods
+                    .iter()
+                    .find(|x| ir.get(**x).decl.name == method.name)
+                    .unwrap();
+                let fn_val = self.get_fn_val(ir, cls_fn);
+                let fn_ptr = fn_val.as_global_value().as_pointer_value();
+                methods.push(fn_ptr.into());
+            }
+            let vtable_ty = self.context.struct_type(
+                &vec![self.context.ptr_type(AddressSpace::default()).into(); methods.len()],
+                false,
+            );
+
+            let vtable_val = vtable_ty.const_named_struct(&methods);
+            let glob = self.module.add_global(
+                vtable_ty,
+                Some(AddressSpace::default()),
+                ir.get(itf).name.get_str(ir),
+            );
+            glob.set_initializer(&vtable_val);
+            self.vtables.insert(cls, glob.as_pointer_value());
+        }
+        self.vtables[&cls]
+    }
+
+    fn get_var<'ir>(&mut self, ir: &IRState<'ir>, var: ir::VarID) -> PointerValue<'ctx> {
+        if self.var_ids.contains_key(&var) {
+            return self.var_ids[&var];
+        }
         let var_ty = var.type_of(&ir.ir);
-        let ty = self.get_type(ir, var_ty);
+        let ty = self.get_repr_type(ir, var_ty);
         let alloca = self.builder.build_alloca(ty, "").unwrap();
         self.var_ids.insert(var, alloca);
         alloca
     }
 
-    fn get_type<'ir>(&mut self, ir: &IRState<'ir>, ty_id: ir::TypeID) -> BasicTypeEnum<'ctx> {
-        if !self.types.contains_key(&ty_id) {
-            let llvm_type = generate_llvm_type(self, ir, ty_id);
-            self.types.insert(ty_id, llvm_type);
+    fn get_repr_type<'ir>(&mut self, ir: &IRState<'ir>, ty_id: ir::TypeID) -> BasicTypeEnum<'ctx> {
+        if !self.repr_types.contains_key(&ty_id) {
+            let llvm_type = match &ir.get(ty_id).kind {
+                ir::TypeKind::I32 => self.context.i32_type().into(),
+                ir::TypeKind::String => self.context.ptr_type(AddressSpace::default()).into(),
+                ir::TypeKind::Void => self.context.i8_type().into(),
+                ir::TypeKind::Struct { .. } => {
+                    self.context.ptr_type(AddressSpace::default()).into()
+                }
+                ir::TypeKind::Itf(_) => itf_repr_ty(self),
+                _ => panic!("no repr type"),
+            };
+            self.repr_types.insert(ty_id, llvm_type);
         }
-        self.types[&ty_id]
+        self.repr_types[&ty_id]
+    }
+
+    fn get_shallow_struct_type<'ir>(
+        &mut self,
+        ir: &IRState<'ir>,
+        ty_id: ir::TypeID,
+    ) -> Option<StructType<'ctx>> {
+        if !self.struct_types.contains_key(&ty_id) {
+            let ty = match &ir.get(ty_id).kind {
+                ir::TypeKind::Struct { fields } => {
+                    let mut field_types = Vec::new();
+                    for field in fields {
+                        let field_ty = self.get_repr_type(ir, field.1);
+                        field_types.push(field_ty);
+                    }
+                    Some(self.context.struct_type(&field_types, false))
+                }
+                _ => None,
+            };
+            self.struct_types.insert(ty_id, ty);
+        }
+        self.struct_types[&ty_id]
     }
 
     fn get_var_type<'ir>(&mut self, ir: &IRState<'ir>, var: ir::VarID) -> BasicTypeEnum<'ctx> {
-        self.get_type(ir, var.type_of(&ir.ir))
+        self.get_repr_type(ir, var.type_of(&ir.ir))
     }
 
     fn load_var<'ir>(&mut self, ir: &IRState<'ir>, var: ir::VarID) -> BasicValueEnum<'ctx> {
@@ -54,96 +171,114 @@ impl<'ctx> CodeGenState<'ctx> {
     }
 }
 
-fn generate_llvm_type<'ctx, 'ir>(
-    code: &mut CodeGenState<'ctx>,
-    ir: &IRState<'ir>,
-    ty_id: ir::TypeID,
-) -> BasicTypeEnum<'ctx> {
-    let ty_decl = ir.ir.get(ty_id);
-    let res = match &ty_decl.kind {
-        ir::TypeKind::Struct { fields } => {
-            let struct_ty = code.context.struct_type(
-                &fields
-                    .iter()
-                    .map(|&ty| generate_llvm_type(code, ir, ty.1).into())
-                    .collect::<Vec<_>>(),
-                false,
-            );
-            struct_ty.into()
-        }
-        ir::TypeKind::I32 => code.context.i32_type().into(),
-        ir::TypeKind::Void => {
-            panic!("void type not allowed here");
-        }
-        ir::TypeKind::String => code.context.ptr_type(AddressSpace::default()).into(),
-        ir::TypeKind::Ptr => code.context.ptr_type(AddressSpace::default()).into(),
-    };
-    code.types.insert(ty_id, res);
-    res
+fn itf_repr_ty<'ctx>(code: &mut CodeGenState<'ctx>) -> BasicTypeEnum<'ctx> {
+    code.context
+        .struct_type(
+            &[
+                code.context.ptr_type(AddressSpace::default()).into(),
+                code.context.ptr_type(AddressSpace::default()).into(),
+            ],
+            false,
+        )
+        .into()
 }
 
-fn codegen_type_decls<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
-    for ty_id in ir.ir.iter_stable::<ir::TypeDeclID>() {
-        code.context
-            .opaque_struct_type(&ir.namer.name_type_decl(ty_id));
-    }
+fn make_itf_val<'ctx>(
+    code: &mut CodeGenState<'ctx>,
+    vtable: PointerValue<'ctx>,
+    data: PointerValue<'ctx>,
+) -> BasicValueEnum<'ctx> {
+    let itf_ty = itf_repr_ty(code).into_struct_type();
+    let val = itf_ty.get_poison();
+    let val = code
+        .builder
+        .build_insert_value(val, vtable, 0, "vtable")
+        .unwrap()
+        .into_struct_value();
+    let val = code
+        .builder
+        .build_insert_value(val, data, 1, "data")
+        .unwrap()
+        .into_struct_value();
+    val.into()
+}
 
-    for ty_id in ir.ir.iter_stable::<ir::TypeDeclID>() {
-        let decl = ir.ir.get(ty_id);
-        let llvm_ty = code
-            .context
-            .get_struct_type(&ir.namer.name_type_decl(ty_id))
-            .unwrap();
-        let ty = ir.ir.get(decl.decl);
-        if let ir::TypeKind::Struct { fields } = &ty.kind {
-            llvm_ty.set_body(
-                &fields
-                    .iter()
-                    .map(|&ty| generate_llvm_type(code, ir, ty.1).into())
-                    .collect::<Vec<_>>(),
-                false,
-            );
-        } else {
-            panic!("only struct types allowed here");
+// assumes that the interface has a compatible representation type
+fn get_itf_fn_type<'ctx, 'ir>(
+    code: &mut CodeGenState<'ctx>,
+    ir: &IRState<'ir>,
+    decl: &ir::FuncDecl,
+) -> FunctionType<'ctx> {
+    let mut map_itf_meth_ty = |ty| {
+        if ty == ir::TypeID::this(ir) {
+            return code.context.ptr_type(AddressSpace::default()).into();
+        } else if ty == ir::TypeID::self_(ir) {
+            return itf_repr_ty(code).into();
         }
+        code.get_repr_type(ir, ty)
+    };
+
+    let arg_types: Vec<BasicMetadataTypeEnum> = decl
+        .args
+        .iter()
+        .map(|&(_, ty)| map_itf_meth_ty(ty).into())
+        .collect::<Vec<_>>();
+    let ret_ty = decl.ret_ty;
+    let fn_type = map_itf_meth_ty(ret_ty).fn_type(arg_types.as_slice(), false);
+    fn_type
+}
+
+fn get_fn_type<'ctx, 'ir>(
+    code: &mut CodeGenState<'ctx>,
+    ir: &IRState<'ir>,
+    func_id: ir::FuncID,
+) -> FunctionType<'ctx> {
+    let func = ir.get(func_id);
+    let fn_type;
+    let arg_types = func
+        .vars
+        .iter()
+        .map(|v| code.get_repr_type(ir, v.type_of(ir)).into())
+        .collect::<Vec<_>>();
+    if func.decl.ret_ty == ir::TypeID::void(ir) {
+        fn_type = code.context.void_type().fn_type(&arg_types, false);
+    } else {
+        fn_type = code
+            .get_repr_type(ir, func.decl.ret_ty)
+            .fn_type(&arg_types, false);
+    }
+    fn_type
+}
+
+fn initialize_codegen<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
+    let prim_regs = ir.get_global::<PrimitiveRegistry>().unwrap();
+    code.repr_types
+        .insert(prim_regs.i32, code.context.i32_type().into());
+    code.repr_types.insert(
+        prim_regs.string,
+        code.context.ptr_type(AddressSpace::default()).into(),
+    );
+    code.repr_types
+        .insert(prim_regs.void, code.context.i8_type().into());
+    for (name, f) in prim_regs.fns.iter() {
+        let fn_type = get_fn_type(code, ir, *f);
+        code.module
+            .add_function(name, fn_type, Some(Linkage::External));
     }
 }
 
 fn codegen_fn<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
-    for func_id in ir.ir.iter_stable::<ir::FuncID>() {
-        let func = ir.ir.get(func_id);
-        let fn_type;
-        let arg_types = func
-            .decl
-            .args
-            .iter()
-            .map(|&(_, ty)| code.get_type(ir, ty).into())
-            .collect::<Vec<_>>();
-        if func.decl.ret_ty == ir::TypeID::insert(&ir.ir, ir::TypeKind::Void) {
-            fn_type = code.context.void_type().fn_type(&arg_types, false);
-        } else {
-            fn_type = code
-                .get_type(ir, func.decl.ret_ty)
-                .fn_type(&arg_types, false);
-        }
-        code.module
-            .add_function(&ir.namer.name_func(func_id), fn_type, None);
-    }
-
-    for func_id in ir.ir.iter::<ir::FuncID>() {
+    for func_id in ir.iter::<ir::FuncID>() {
         let func = ir.ir.get(func_id);
         if func.builtin {
             continue;
         }
-        let llvm_func = code
-            .module
-            .get_function(ir.namer.name_func(func_id))
-            .unwrap();
+        let llvm_func = code.get_fn_val(ir, func_id);
         let entry = code.context.append_basic_block(llvm_func, "entry");
         code.builder.position_at_end(entry);
         for (i, arg) in llvm_func.get_param_iter().enumerate() {
             arg.set_name(&ir.namer.name_var(func.vars[i]));
-            let sarg = code.new_stack_var(ir, func.vars[i]);
+            let sarg = code.get_var(ir, func.vars[i]);
             code.builder.build_store(sarg, arg).unwrap();
         }
         for op in &func.body {
@@ -155,128 +290,251 @@ fn codegen_fn<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
     }
 }
 
-fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, op: ir::OPID) {
-    let op = ir.ir.get(op);
+fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, opid: ir::OPID) {
+    let op = ir.ir.get(opid);
     match &op.kind {
         // every var corresponds to a stack pointer
-        ir::OPKind::Constant(c) => match c {
-            ir::ConstKind::I32(value) => {
-                let const_val = code.context.i32_type().const_int(*value as u64, false);
-                let var = code.new_stack_var(ir, op.res.unwrap());
-                code.builder.build_store(var, const_val).unwrap();
-            }
-            ir::ConstKind::String(s) => {
-                let str = s.get_str(&ir.ir);
-                let str_val = code.builder.build_global_string_ptr(str, "str").unwrap();
-
-                let res = code.new_stack_var(ir, op.res.unwrap());
-                let rts_new_str = code.module.get_function("__rts_new_string").unwrap();
-                let const_len = code
-                    .context
-                    .i32_type()
-                    .const_int(str.as_bytes().len() as u64, false);
-                let ptr = code
-                    .builder
-                    .build_call(
-                        rts_new_str,
-                        &[const_len.into(), str_val.as_pointer_value().into()],
-                        "",
-                    )
-                    .unwrap();
-                code.builder
-                    .build_store(res, ptr.try_as_basic_value().left().unwrap())
-                    .unwrap();
-            }
-            _ => unimplemented!("codegen for {:?}", c),
-        },
+        ir::OPKind::Let { value } => codegen_let(code, ir, op.res.unwrap(), *value),
+        ir::OPKind::Constant(c) => codegen_const_op(code, ir, op.res.unwrap(), c),
         ir::OPKind::Add { lhs, rhs } => {
             let lhs_llvm = code.load_var(ir, *lhs);
             let rhs_llvm = code.load_var(ir, *rhs);
 
-            let res_ptr = code.new_stack_var(ir, op.res.unwrap());
+            let res_ptr = code.get_var(ir, op.res.unwrap());
             let res_val = code
                 .builder
                 .build_int_add(lhs_llvm.into_int_value(), rhs_llvm.into_int_value(), "")
                 .unwrap();
             code.builder.build_store(res_ptr, res_val).unwrap();
         }
-        ir::OPKind::Call { func, args } => {
-            let func = code
-                .module
-                .get_function(&ir.namer.name_func(*func))
-                .unwrap();
-            let args = args
-                .iter()
-                .enumerate()
-                .map(|(i, &arg)| {
-                    let ptr = code.var_ids[&arg];
-
-                    // let arg_ty = arg_val.get_type();
-                    // ignore the actual type of var for now
-                    let expected_arg_ty = func.get_nth_param(i as u32).unwrap().get_type();
-                    let arg_val = code.builder.build_load(expected_arg_ty, ptr, "").unwrap();
-
-                    // if arg_ty != expected_arg_ty {
-                    //     panic!("expected arg type {:?}, got {:?}", expected_arg_ty, arg_ty);
-                    // }
-                    arg_val.into()
-                })
-                .collect::<Vec<_>>();
-
-            let res_val = code
-                .builder
-                .build_call(func, &args, "call")
-                .unwrap()
-                .try_as_basic_value();
-            if !(op.res.is_none()
-                || op.res.unwrap().type_of(&ir.ir)
-                    == ir::TypeID::insert(&ir.ir, ir::TypeKind::Void))
-            {
-                let res_ptr = code.new_stack_var(ir, op.res.unwrap());
-                if res_val.is_left() {
-                    code.builder
-                        .build_store(res_ptr, res_val.left().unwrap())
-                        .unwrap();
-                }
-            }
-        }
+        ir::OPKind::Call { func, args } => codegen_call(code, ir, *func, args, op.res),
         ir::OPKind::GetAttr { obj, idx, .. } => {
-            let obj_val = code.var_ids[obj];
-            let obj_ty = code.get_var_type(ir, *obj).into_struct_type();
-            let res_ty = code.get_var_type(ir, op.res.unwrap());
-            let idx = idx.unwrap();
-            let field = code
-                .builder
-                .build_struct_gep(obj_ty, obj_val, idx as u32, "")
-                .unwrap();
-            let field_val = code.builder.build_load(res_ty, field, "").unwrap();
-            let res_ptr = code.new_stack_var(ir, op.res.unwrap());
-            code.builder.build_store(res_ptr, field_val).unwrap();
+            codegen_getattr(code, ir, *obj, idx.unwrap(), op.res.unwrap())
         }
+        ir::OPKind::MethodCall { obj, method, args } => {
+            codegen_methodcall(code, ir, *obj, *method, args)
+        }
+        ir::OPKind::ClsCtor { cls, arg } => codegen_cls_ctor(code, ir, *cls, *arg),
         ir::OPKind::Return { value } => {
             let ret_val = code.load_var(ir, *value);
             code.builder.build_return(Some(&ret_val)).unwrap();
         }
-        ir::OPKind::Struct { fields } => {
-            let res = code.new_stack_var(ir, op.res.unwrap());
-            let struct_ty = code
-                .get_type(ir, op.res.unwrap().type_of(&ir.ir))
-                .into_struct_type();
-            for (i, (_, field)) in fields.iter().enumerate() {
-                let field_val = code.load_var(ir, *field);
-                let field_ptr = code
-                    .builder
-                    .build_struct_gep(struct_ty, res, i as u32, "")
-                    .unwrap();
-                code.builder.build_store(field_ptr, field_val).unwrap();
-            }
-        }
+        ir::OPKind::Struct { fields } => codegen_struct(code, ir, fields, op.res.unwrap()),
         ir::OPKind::Assign { lhs, rhs } => {
             let rhs_val = code.load_var(ir, *rhs);
             let lhs_ptr = code.var_ids[lhs];
             code.builder.build_store(lhs_ptr, rhs_val).unwrap();
         }
     }
+}
+
+fn codegen_const_op<'ctx, 'ir>(
+    code: &mut CodeGenState<'ctx>,
+    ir: &IRState<'ir>,
+    res: ir::VarID,
+    c: &ir::ConstKind,
+) {
+    match c {
+        ir::ConstKind::I32(value) => {
+            let const_val = code.context.i32_type().const_int(*value as u64, false);
+            let var = code.get_var(ir, res);
+            code.builder.build_store(var, const_val).unwrap();
+        }
+        ir::ConstKind::String(s) => {
+            let str = s.get_str(&ir.ir);
+            let str_val = code.builder.build_global_string_ptr(str, "str").unwrap();
+
+            let res = code.get_var(ir, res);
+            let rts_new_str = code.module.get_function("__rts_new_string").unwrap();
+            let const_len = code
+                .context
+                .i32_type()
+                .const_int(str.as_bytes().len() as u64, false);
+            let ptr = code
+                .builder
+                .build_call(
+                    rts_new_str,
+                    &[const_len.into(), str_val.as_pointer_value().into()],
+                    "",
+                )
+                .unwrap();
+            code.builder
+                .build_store(res, ptr.try_as_basic_value().left().unwrap())
+                .unwrap();
+        }
+        _ => unimplemented!("codegen for {:?}", c),
+    }
+}
+
+fn codegen_call<'ctx, 'ir>(
+    code: &mut CodeGenState<'ctx>,
+    ir: &IRState<'ir>,
+    func: ir::FuncID,
+    args: &[ir::VarID],
+    res: Option<ir::VarID>,
+) {
+    let func = code.get_fn_val(ir, func);
+
+    let args = args
+        .iter()
+        .enumerate()
+        .map(|(i, &arg)| {
+            let ptr = code.var_ids[&arg];
+
+            let arg_ty = code.get_var_type(ir, arg);
+            let expected_arg_ty = func.get_nth_param(i as u32).unwrap().get_type();
+            if arg_ty != expected_arg_ty {
+                panic!("expected arg type {:?}, got {:?}", expected_arg_ty, arg_ty);
+            }
+            let arg_val = code.builder.build_load(arg_ty, ptr, "").unwrap();
+            arg_val.into()
+        })
+        .collect::<Vec<_>>();
+
+    let res_val = code
+        .builder
+        .build_call(func, &args, "call")
+        .unwrap()
+        .try_as_basic_value();
+    if !(res.is_none() || res.unwrap().type_of(&ir.ir) == ir::TypeID::void(ir)) {
+        let res_ptr = code.get_var(ir, res.unwrap());
+        if res_val.is_left() {
+            code.builder
+                .build_store(res_ptr, res_val.left().unwrap())
+                .unwrap();
+        }
+    }
+}
+
+fn codegen_getattr<'ctx, 'ir>(
+    code: &mut CodeGenState<'ctx>,
+    ir: &IRState<'ir>,
+    obj: ir::VarID,
+    idx: usize,
+    res: ir::VarID,
+) {
+    // every struct is allocated on the heap, first remove the stack pointer indirection
+    let obj_val = code.load_var(ir, obj).into_pointer_value();
+    let struct_ty = code.get_shallow_struct_type(ir, obj.type_of(&ir)).unwrap();
+
+    let field = code
+        .builder
+        .build_struct_gep(struct_ty, obj_val, idx as u32, "")
+        .unwrap();
+
+    // this is for the purpose of "foo.bar = 1"
+    // this has the effect of aliasing a pointer to the field
+    // we make sure that all "value types" like i32 are copied when used as a function parameter
+    code.var_ids.insert(res, field);
+}
+
+fn codegen_struct<'ctx, 'ir>(
+    code: &mut CodeGenState<'ctx>,
+    ir: &IRState<'ir>,
+    fields: &[(ir::SymbolID, ir::VarID)],
+    res: ir::VarID,
+) {
+    let struct_ty = code.get_shallow_struct_type(ir, res.type_of(&ir)).unwrap();
+    let size = struct_ty.size_of().unwrap();
+    let gc_alloc = code.module.get_function("__rts_gc_alloc").unwrap();
+
+    // TODO: the first argument should be the configuration struct specifying
+    // the fields that are pointers allocated by the gc
+    // leak memory for now
+    let nullptr = code.context.ptr_type(AddressSpace::default()).const_null();
+    let gc_ptr = code
+        .builder
+        .build_call(gc_alloc, &[nullptr.into(), size.into()], "alloc")
+        .unwrap()
+        .try_as_basic_value()
+        .left()
+        .unwrap()
+        .into_pointer_value();
+
+    for (i, (_, field)) in fields.iter().enumerate() {
+        let field_val = code.load_var(ir, *field);
+        let field_ptr = code
+            .builder
+            .build_struct_gep(struct_ty, gc_ptr, i as u32, "")
+            .unwrap();
+        code.builder.build_store(field_ptr, field_val).unwrap();
+    }
+    let res_ptr = code.get_var(ir, res);
+    code.builder.build_store(res_ptr, gc_ptr).unwrap();
+}
+
+fn codegen_cls_ctor<'ctx, 'ir>(
+    code: &mut CodeGenState<'ctx>,
+    ir: &IRState<'ir>,
+    cls: ir::ClassID,
+    arg: ir::VarID,
+) {
+    let vtable_ptr = code.build_vtable(ir, cls);
+    let data = code.load_var(ir, arg).into_pointer_value();
+    let itf_val = make_itf_val(code, vtable_ptr, data);
+    let res_ptr = code.get_var(ir, arg);
+    code.builder.build_store(res_ptr, itf_val).unwrap();
+}
+
+fn codegen_methodcall<'ctx, 'ir>(
+    code: &mut CodeGenState<'ctx>,
+    ir: &IRState<'ir>,
+    obj: ir::VarID,
+    method: ir::SymbolID,
+    args: &[ir::VarID],
+) {
+    let itf = ir.get(obj).ty.unwrap();
+    let ir::TypeKind::Itf(itf) = ir.get(itf).kind else {
+        panic!("methodcall of non-itf object")
+    };
+    let itf = ir.get(itf);
+    let method_idx = itf.methods.iter().position(|x| x.name == method).unwrap();
+    let vtable_ty = code.context.struct_type(
+        &vec![code.context.ptr_type(AddressSpace::default()).into(); itf.methods.len()],
+        false,
+    );
+
+    let obj_val = code.load_var(ir, obj).into_struct_value();
+    let vtable = code
+        .builder
+        .build_extract_value(obj_val, 0, "")
+        .unwrap()
+        .into_pointer_value();
+    let data = code
+        .builder
+        .build_extract_value(obj_val, 1, "")
+        .unwrap()
+        .into_pointer_value();
+    let fn_ptr = code
+        .builder
+        .build_struct_gep(vtable_ty, vtable, method_idx as u32, "")
+        .unwrap();
+    let fn_ty = get_itf_fn_type(code, ir, &itf.methods[method_idx]);
+    let mut args_vals = vec![data.into()];
+    for arg in args {
+        let arg_val = code.load_var(ir, *arg).into();
+        args_vals.push(arg_val);
+    }
+    let res = code
+        .builder
+        .build_indirect_call(fn_ty, fn_ptr, &args_vals, "meth")
+        .unwrap()
+        .try_as_basic_value();
+    if let Either::Left(res) = res {
+        let res_ptr = code.get_var(ir, obj);
+        code.builder.build_store(res_ptr, res).unwrap();
+    }
+}
+
+fn codegen_let<'ctx, 'ir>(
+    code: &mut CodeGenState<'ctx>,
+    ir: &IRState<'ir>,
+    var: ir::VarID,
+    value: ir::VarID,
+) {
+    let value = code.load_var(ir, value);
+    let var_ptr = code.get_var(ir, var);
+    code.builder.build_store(var_ptr, value).unwrap();
 }
 
 /// TODO:
@@ -341,22 +599,14 @@ impl Default for OptLevel {
 pub fn generate_llvm(ir: &ir::IR, opt_level: OptLevel) -> Result<String> {
     let context = Context::create();
     let module = context.create_module("main");
-    let builder = context.create_builder();
 
-    let mut codegen = CodeGenState {
-        context: &context,
-        module,
-        builder,
-        types: HashMap::new(),
-        var_ids: HashMap::new(),
-    };
-
+    let mut codegen = CodeGenState::new(&context, module);
     let ir_state = IRState {
         ir,
         namer: ir::IRNamer::new(ir),
     };
 
-    codegen_type_decls(&mut codegen, &ir_state);
+    initialize_codegen(&mut codegen, &ir_state);
     codegen_fn(&mut codegen, &ir_state);
 
     if let OptLevel::O1 = opt_level {
@@ -376,7 +626,7 @@ fn make_pointer_type<'a>(ty: BasicTypeEnum<'a>) -> PointerType<'a> {
 
 #[cfg(test)]
 mod tests {
-    use inkwell::AddressSpace;
+    use inkwell::{context, AddressSpace};
 
     use super::*;
     #[test]
@@ -547,11 +797,72 @@ mod tests {
         println!("{}", module_str);
     }
 
+    #[test]
+    fn test_build_vtable() {
+        let context = Context::create();
+        let module = context.create_module("test");
+        let builder = context.create_builder();
+
+        let vtable_ty = context.struct_type(
+            &[
+                context.ptr_type(AddressSpace::default()).into(),
+                context.ptr_type(AddressSpace::default()).into(),
+            ],
+            false,
+        );
+
+        let foo = module.add_function("foo", context.void_type().fn_type(&[], false), None);
+        let bar = module.add_function("bar", context.void_type().fn_type(&[], false), None);
+
+        let vtable = vtable_ty.const_named_struct(&[
+            foo.as_global_value().as_pointer_value().into(),
+            bar.as_global_value().as_pointer_value().into(),
+        ]);
+
+        let glob = module.add_global(vtable_ty, Some(AddressSpace::default()), "vtable");
+        glob.set_initializer(&vtable);
+
+        println!("{}", module.print_to_string().to_string());
+    }
+
+    #[test]
+    fn test_call_ptr() {
+        let context = Context::create();
+        let module = context.create_module("test");
+        let builder = context.create_builder();
+
+        let print_ty = context
+            .void_type()
+            .fn_type(&[context.ptr_type(AddressSpace::default()).into()], false);
+        let print = module.add_function("print", print_ty, None);
+        let glob = module.add_global(context.ptr_type(AddressSpace::default()), None, "glob");
+        glob.set_initializer(&print.as_global_value().as_pointer_value());
+
+        let main = module.add_function("main", context.void_type().fn_type(&[], false), None);
+        let entry = context.append_basic_block(main, "entry");
+        builder.position_at_end(entry);
+        let ptr = module.get_global("glob").unwrap().as_pointer_value();
+        // ptr into function
+        builder
+            .build_indirect_call(
+                print_ty,
+                ptr,
+                &[context
+                    .ptr_type(AddressSpace::default())
+                    .const_null()
+                    .into()],
+                "tr",
+            )
+            .unwrap();
+
+        println!("{}", module.print_to_string().to_string());
+    }
+
     fn run_frontend(s: &str) -> ir::IR {
         let src = s.into();
         let ast = frontend::parse(&src).unwrap();
-        let mut ir = frontend::ast_to_ir(&src, &ast).unwrap();
-        frontend::transform_ir(&mut ir, &src).unwrap();
+        let mut ir = frontend::ast_to_ir(src, ast).unwrap();
+        frontend::transform_ir(&mut ir).unwrap();
         ir
     }
 

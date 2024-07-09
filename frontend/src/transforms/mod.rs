@@ -101,11 +101,7 @@ impl Query for GetAttrIdxQuery {
 }
 
 fn get_fn_type(ir: &ir::IR, fdecl: &ir::FuncDecl) -> ir::TypeID {
-    let args = fdecl
-        .args
-        .iter()
-        .map(|(_, ty)| *ty)
-        .collect::<Vec<_>>();
+    let args = fdecl.args.iter().map(|(_, ty)| *ty).collect::<Vec<_>>();
     let ret_ty = fdecl.ret_ty;
     ir::TypeID::insert(ir, ir::TypeKind::Fn(args, ret_ty))
 }
@@ -126,9 +122,30 @@ fn has_itf_repr_ty(ir: &ir::IR, itf: ir::InterfaceID) -> bool {
 
 fn has_cls_repr_ty(ir: &ir::IR, cls: ir::ClassID) -> bool {
     let cls = ir.get(cls);
-    cls.for_itf.map(|itf| has_itf_repr_ty(ir, itf)).unwrap_or(false)
+    cls.for_itf
+        .map(|itf| has_itf_repr_ty(ir, itf))
+        .unwrap_or(false)
 }
 
+// #[derive(Clone, Hash, PartialEq, Eq)]
+// pub struct NormalizeItfMethodTypes(pub ir::InterfaceID, pub ir::ClassID);
+
+// impl Query for NormalizeItfMethodTypes {
+//     type Result = PResult<ir::TypeID>;
+//     fn query(&self, q: &QueryAnalysis) -> Self::Result {
+//         let (itf, cls) = (self.0, self.1);
+
+//         if !has_cls_repr_ty(q.ir(), cls) {
+//             return Err(ProgramError {
+//                 error_message: "No representation type for the interface",
+//                 ..Default::default()
+//             });
+//         }
+
+//         let itf = q.ir().get(itf);
+
+//     }
+// }
 
 impl Query for VarTypeQuery {
     type Result = PResult<ir::TypeID>;
@@ -223,8 +240,11 @@ impl Query for VarTypeQuery {
                 ir::TypeID::insert(ir, ir::TypeKind::Itf(itf))
             }
             ir::OPKind::MethodCall { obj, method, args } => {
-                let tyid = q.query(VarTypeQuery(*obj)).unwrap()?;
-                let obj_ty = ir.get(tyid);
+                let itf_ty_id = q.query(VarTypeQuery(*obj)).unwrap()?;
+                let self_ty_id = ir::TypeID::self_(ir);
+                let obj_ty = ir.get(itf_ty_id);
+                // there shouldn't exist any "This" types
+
                 match &obj_ty.kind {
                     ir::TypeKind::Itf(itf) => {
                         let itf = ir.get(*itf);
@@ -237,10 +257,17 @@ impl Query for VarTypeQuery {
                             });
                         }
                         let method = method.unwrap();
-                        if method.args.len() - 1 != args.len() || !method.args[1..].iter().zip(args.iter()).all(|(a, b)| {
-                            let ty = q.query(VarTypeQuery(*b)).unwrap().unwrap();
-                            ty == a.1
-                        }) {
+                        if method.args.len() - 1 != args.len()
+                            || !method.args[1..].iter().zip(args.iter()).all(|(a, b)| {
+                                let ty = q.query(VarTypeQuery(*b)).unwrap().unwrap();
+                                // make sure to normalize all Self to the representation type
+                                if a.1 == self_ty_id {
+                                    ty == itf_ty_id
+                                } else {
+                                    ty == a.1
+                                }
+                            })
+                        {
                             return Err(ProgramError {
                                 span: Some(op.span),
                                 error_message: "Type mismatch",
@@ -248,6 +275,9 @@ impl Query for VarTypeQuery {
                             });
                         }
 
+                        if method.ret_ty == self_ty_id {
+                            return Ok(itf_ty_id);
+                        }
                         return Ok(method.ret_ty);
                     }
                     _ => {
@@ -282,14 +312,12 @@ fn subsititute_cls_repr_type(ir: &mut ir::IR) -> PhaseResult<()> {
     let mut need_remap = vec![];
     for id in ir.iter::<ir::ClassID>() {
         let cls = ir.get(id);
-        let new_this_ty = cls.repr_type.unwrap_or_else(|| {
-            ir::TypeID::void(ir)
-        });
+        let new_this_ty = cls.repr_type.unwrap_or_else(|| ir::TypeID::void(ir));
 
-        let itf_ty = cls.for_itf.map(|itf| {
-            ir::TypeID::insert(ir, ir::TypeKind::Itf(itf))
-        });
-        
+        let itf_ty = cls
+            .for_itf
+            .map(|itf| ir::TypeID::insert(ir, ir::TypeKind::Itf(itf)));
+
         let has_repr = has_cls_repr_ty(ir, id);
         for f in cls.methods.iter() {
             let f = ir.get(*f);
@@ -656,6 +684,17 @@ mod test_type_infer {
                 return this;
             }
         }
+        interface Baz {
+            fn baz(this, a: Self): Self
+        }
+
+        class Qux for Baz(B) {
+            fn baz(this, a: Self): Self {
+                this.a = (this.a + 1);
+                return a.baz(Qux(this));
+            }
+        }
+
         fn main() {
             let b = Bar({a: 3});
             b.foo(1);

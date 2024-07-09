@@ -277,6 +277,10 @@ impl TypeID {
     pub fn self_(ir: &IR) -> TypeID {
         TypeID::insert(ir, TypeKind::Self_)
     }
+
+    pub fn itf(ir: &IR, itf: InterfaceID) -> TypeID {
+        TypeID::insert(ir, TypeKind::Itf(itf))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -336,7 +340,7 @@ impl_id!(FuncID, FuncImpl, false);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FuncImpl {
-    pub decl: FuncDecl, // signature includes the original This type
+    pub decl: FuncDecl,   // signature includes the original This type
     pub vars: Vec<VarID>, // remap This/Self to reflect concrete type
     pub body: Vec<OPID>,
     pub builtin: bool,

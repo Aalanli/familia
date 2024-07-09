@@ -167,11 +167,26 @@ pub enum ExprKind {
     Var(Var),
     IntLit(i32),
     StringLit(String),
-    MethodCall { exp: P<Expr>, sym: Ident, args: Vec<Expr> },
-    GetAttr { exp: P<Expr>, sym: Ident },
-    Add { lhs: P<Expr>, rhs: P<Expr> },
-    Call { path: Path, args: Vec<Expr> },
-    Struct { args: Vec<(Ident, Expr)> },
+    MethodCall {
+        exp: P<Expr>,
+        sym: Ident,
+        args: Vec<Expr>,
+    },
+    GetAttr {
+        exp: P<Expr>,
+        sym: Ident,
+    },
+    Add {
+        lhs: P<Expr>,
+        rhs: P<Expr>,
+    },
+    Call {
+        path: Path,
+        args: Vec<Expr>,
+    },
+    Struct {
+        args: Vec<(Ident, Expr)>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -242,7 +257,12 @@ pub fn default_visit_decl<'a>(decl: &'a Decl, visitor: &mut impl Visitor<'a>) {
                 visitor.visit_stmt(stmt);
             }
         }
-        DeclKind::ClassImpl { sub_decls, for_it, repr_ty, .. } => {
+        DeclKind::ClassImpl {
+            sub_decls,
+            for_it,
+            repr_ty,
+            ..
+        } => {
             for sub_decl in sub_decls {
                 visitor.visit_decl(sub_decl);
             }

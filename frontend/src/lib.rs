@@ -6,7 +6,13 @@ pub mod prelude;
 pub mod query;
 pub mod transforms;
 
-use std::{cell::RefCell, collections::HashSet, fmt::{Debug, Display}, hash::Hash, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::HashSet,
+    fmt::{Debug, Display},
+    hash::Hash,
+    rc::Rc,
+};
 
 pub use parser::parse;
 pub use transforms::{ast_to_ir, transform_ir};
