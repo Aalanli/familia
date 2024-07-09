@@ -309,6 +309,7 @@ fn subsititute_cls_repr_type(ir: &mut ir::IR) -> PhaseResult<()> {
     let self_ = ir::TypeID::self_(ir);
     let src = ir.get_global::<ir::ModuleID>().unwrap();
     let src = ir.get(*src).src.clone().unwrap();
+    
     let mut need_remap = vec![];
     for id in ir.iter::<ir::ClassID>() {
         let cls = ir.get(id);
@@ -319,8 +320,29 @@ fn subsititute_cls_repr_type(ir: &mut ir::IR) -> PhaseResult<()> {
             .map(|itf| ir::TypeID::insert(ir, ir::TypeKind::Itf(itf)));
 
         let has_repr = has_cls_repr_ty(ir, id);
-        for f in cls.methods.iter() {
-            let f = ir.get(*f);
+        let remap_ty = |ty: &mut ir::TypeID, span| {
+            if *ty == this {
+                *ty = new_this_ty;
+            } else if *ty == self_ {
+                if has_repr {
+                    *ty = itf_ty.unwrap();
+                } else {
+                    src.add_err(ProgramError {
+                        span,
+                        error_message: "Self is not allowed, no representation type",
+                        ..Default::default()
+                    });
+                }
+            }
+        };
+
+        for fid in cls.methods.clone() {
+            let f = ir.get_mut(fid);
+            for t in f.decl.args.iter_mut() {
+                remap_ty(&mut t.1, Some(f.decl.span));
+            }
+            remap_ty(&mut f.decl.ret_ty, Some(f.decl.span));
+            let f = ir.get(fid);
             for v in f.vars.iter() {
                 need_remap.push(*v);
             }
@@ -334,19 +356,7 @@ fn subsititute_cls_repr_type(ir: &mut ir::IR) -> PhaseResult<()> {
         for v in need_remap.iter() {
             let var = ir.get_mut(*v);
             let Some(ty) = var.ty.as_mut() else { continue };
-            if *ty == this {
-                *ty = new_this_ty;
-            } else if *ty == self_ {
-                if has_repr {
-                    *ty = itf_ty.unwrap();
-                } else {
-                    src.add_err(ProgramError {
-                        span: var.span,
-                        error_message: "Self is not allowed, no representation type",
-                        ..Default::default()
-                    });
-                }
-            }
+            remap_ty(ty, var.span);
         }
     }
     src.commit_error(())
@@ -415,7 +425,7 @@ lazy_static! {
         },
         RTSFnProto {
             name: "__rts_gc_alloc",
-            arg_tys: vec![ir::TypeKind::I32],
+            arg_tys: vec![ir::TypeKind::Ptr(None), ir::TypeKind::I32],
             ret_ty: ir::TypeKind::Ptr(None),
         },
         RTSFnProto {

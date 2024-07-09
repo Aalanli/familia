@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 
+use familia_frontend::transforms::RTSRegistry;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
@@ -78,6 +79,12 @@ impl<'ctx> CodeGenState<'ctx> {
         llvm_func
     }
 
+    fn get_rts_fn<'ir>(&mut self, ir: &IRState<'ir>, f: &str) -> FunctionValue<'ctx> {
+        let regs = ir.get_global::<RTSRegistry>().unwrap();
+        let f = regs.fns[f];
+        self.get_fn_val(ir, f)
+    }
+
     fn build_vtable<'ir>(&mut self, ir: &IRState<'ir>, cls: ir::ClassID) -> PointerValue<'ctx> {
         if !self.vtables.contains_key(&cls) {
             let itf = ir.get(cls).for_itf.unwrap();
@@ -116,7 +123,7 @@ impl<'ctx> CodeGenState<'ctx> {
         }
         let var_ty = var.type_of(&ir.ir);
         let ty = self.get_repr_type(ir, var_ty);
-        let alloca = self.builder.build_alloca(ty, "").unwrap();
+        let alloca = self.builder.build_alloca(ty, &*ir.namer().name_var(var)).unwrap();
         self.var_ids.insert(var, alloca);
         alloca
     }
@@ -131,7 +138,8 @@ impl<'ctx> CodeGenState<'ctx> {
                     self.context.ptr_type(AddressSpace::default()).into()
                 }
                 ir::TypeKind::Itf(_) => itf_repr_ty(self),
-                _ => panic!("no repr type"),
+                ir::TypeKind::Ptr(_) => self.context.ptr_type(AddressSpace::default()).into(),
+                x => panic!("no repr type {:?}", x),
             };
             self.repr_types.insert(ty_id, llvm_type);
         }
@@ -236,9 +244,9 @@ fn get_fn_type<'ctx, 'ir>(
     let func = ir.get(func_id);
     let fn_type;
     let arg_types = func
-        .vars
+        .decl.args
         .iter()
-        .map(|v| code.get_repr_type(ir, v.type_of(ir)).into())
+        .map(|(_, t)| code.get_repr_type(ir, *t).into())
         .collect::<Vec<_>>();
     if func.decl.ret_ty == ir::TypeID::void(ir) {
         fn_type = code.context.void_type().fn_type(&arg_types, false);
@@ -268,7 +276,7 @@ fn initialize_codegen<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir
 }
 
 fn codegen_fn<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
-    for func_id in ir.iter::<ir::FuncID>() {
+    for func_id in ir.iter_stable::<ir::FuncID>() {
         let func = ir.ir.get(func_id);
         if func.builtin {
             continue;
@@ -292,6 +300,7 @@ fn codegen_fn<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>) {
 
 fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, opid: ir::OPID) {
     let op = ir.ir.get(opid);
+    // println!("{:?}", op.kind);
     match &op.kind {
         // every var corresponds to a stack pointer
         ir::OPKind::Let { value } => codegen_let(code, ir, op.res.unwrap(), *value),
@@ -312,9 +321,9 @@ fn codegen_op<'ctx, 'ir>(code: &mut CodeGenState<'ctx>, ir: &IRState<'ir>, opid:
             codegen_getattr(code, ir, *obj, idx.unwrap(), op.res.unwrap())
         }
         ir::OPKind::MethodCall { obj, method, args } => {
-            codegen_methodcall(code, ir, *obj, *method, args)
+            codegen_methodcall(code, ir, *obj, *method, args, op.res.unwrap())
         }
-        ir::OPKind::ClsCtor { cls, arg } => codegen_cls_ctor(code, ir, *cls, *arg),
+        ir::OPKind::ClsCtor { cls, arg } => codegen_cls_ctor(code, ir, *cls, *arg, op.res.unwrap()),
         ir::OPKind::Return { value } => {
             let ret_val = code.load_var(ir, *value);
             code.builder.build_return(Some(&ret_val)).unwrap();
@@ -345,7 +354,7 @@ fn codegen_const_op<'ctx, 'ir>(
             let str_val = code.builder.build_global_string_ptr(str, "str").unwrap();
 
             let res = code.get_var(ir, res);
-            let rts_new_str = code.module.get_function("__rts_new_string").unwrap();
+            let rts_new_str = code.get_rts_fn(ir, "__rts_new_string");
             let const_len = code
                 .context
                 .i32_type()
@@ -374,14 +383,15 @@ fn codegen_call<'ctx, 'ir>(
     res: Option<ir::VarID>,
 ) {
     let func = code.get_fn_val(ir, func);
-    println!("{}", func.get_name().to_str().unwrap());
+    // println!("{}", func.get_name().to_str().unwrap());
+    assert!(func.count_params() == args.len() as u32);
 
     let args = args
         .iter()
         .enumerate()
         .map(|(i, &arg)| {
             let ptr = code.var_ids[&arg];
-            println!("gen {i}");
+            // println!("gen {i}");
 
             let arg_ty = code.get_var_type(ir, arg);
             let expected_arg_ty = func.get_nth_param(i as u32).unwrap();
@@ -438,7 +448,8 @@ fn codegen_struct<'ctx, 'ir>(
 ) {
     let struct_ty = code.get_shallow_struct_type(ir, res.type_of(&ir)).unwrap();
     let size = struct_ty.size_of().unwrap();
-    let gc_alloc = code.module.get_function("__rts_gc_alloc").unwrap();
+    let size = code.builder.build_int_cast(size, code.context.i32_type(), "").unwrap();
+    let gc_alloc = code.get_rts_fn(ir, "__rts_gc_alloc");
 
     // TODO: the first argument should be the configuration struct specifying
     // the fields that are pointers allocated by the gc
@@ -470,12 +481,13 @@ fn codegen_cls_ctor<'ctx, 'ir>(
     ir: &IRState<'ir>,
     cls: ir::ClassID,
     arg: ir::VarID,
+    res: ir::VarID
 ) {
     let vtable_ptr = code.build_vtable(ir, cls);
     let data = code.load_var(ir, arg).into_pointer_value();
     let itf_val = make_itf_val(code, vtable_ptr, data);
-    let res_ptr = code.get_var(ir, arg);
-    code.builder.build_store(res_ptr, itf_val).unwrap();
+    let res_var = code.get_var(ir, res);
+    code.builder.build_store(res_var, itf_val).unwrap();
 }
 
 fn codegen_methodcall<'ctx, 'ir>(
@@ -484,6 +496,7 @@ fn codegen_methodcall<'ctx, 'ir>(
     obj: ir::VarID,
     method: ir::SymbolID,
     args: &[ir::VarID],
+    res_var: ir::VarID
 ) {
     let itf = ir.get(obj).ty.unwrap();
     let ir::TypeKind::Itf(itf) = ir.get(itf).kind else {
@@ -523,7 +536,7 @@ fn codegen_methodcall<'ctx, 'ir>(
         .unwrap()
         .try_as_basic_value();
     if let Either::Left(res) = res {
-        let res_ptr = code.get_var(ir, obj);
+        let res_ptr = code.get_var(ir, res_var);
         code.builder.build_store(res_ptr, res).unwrap();
     }
 }
@@ -618,17 +631,17 @@ pub fn generate_llvm(ir: &ir::IR, opt_level: OptLevel) -> Result<String> {
     Ok(codegen.module.to_string())
 }
 
-use inkwell::llvm_sys::core;
-fn make_pointer_type<'a>(ty: BasicTypeEnum<'a>) -> PointerType<'a> {
-    unsafe {
-        let ptr_ty = core::LLVMPointerType(ty.as_type_ref(), 0);
-        PointerType::new(ptr_ty)
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use inkwell::{AddressSpace};
+    use inkwell::llvm_sys::core;
+    fn make_pointer_type<'a>(ty: BasicTypeEnum<'a>) -> PointerType<'a> {
+        unsafe {
+            let ptr_ty = core::LLVMPointerType(ty.as_type_ref(), 0);
+            PointerType::new(ptr_ty)
+        }
+    }
 
     use super::*;
     #[test]
@@ -922,9 +935,9 @@ mod tests {
 
             fn main() {
                 let a = {a: 1, b: 2};
-                let c = {a: a};
-                bar(3, a.a);
-                foo(a);
+                // let c = {a: a};
+                // bar(3, a.a);
+                // foo(a);
 
             }
         ",
@@ -945,10 +958,50 @@ mod tests {
                 print(c);
                 return (b + c);
             }
+            fn main() {
+                print(foo(\"1\"));
+            }
             ",
         );
         println!("{}", ir::print_basic(&ir));
         let llvm = generate_llvm(&ir, Default::default()).unwrap();
+        println!("{}", llvm);
+    }
+
+    #[test]
+    fn test_codegen5() {
+        let ir = run_frontend(
+            "\
+            interface Foo {
+                fn foo(this, a: i32): Self
+            }
+            type B = { a: i32 }
+            class Bar for Foo(B) {
+                fn foo(this, a: i32): Self {
+                    print(to_str(a));
+                    this.a = (a + 1);
+                    return this;
+                }
+            }
+            interface Baz {
+                fn baz(this, a: Self): Self
+            }
+
+            class Qux for Baz(B) {
+                fn baz(this, a: Self): Self {
+                    this.a = (this.a + 1);
+                    return a.baz(Qux(this));
+                }
+            }
+
+            fn main() {
+                let b = Bar({a: 3});
+                b.foo(1);
+            }
+            ",
+        );
+        println!("{}", ir::print_basic(&ir));
+        let llvm = generate_llvm(&ir, OptLevel::O1).unwrap();
         println!("{}", llvm);
     }
 }

@@ -340,7 +340,7 @@ impl_id!(FuncID, FuncImpl, false);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FuncImpl {
-    pub decl: FuncDecl,   // signature includes the original This type
+    pub decl: FuncDecl,   // signature types and type of vars should be the same
     pub vars: Vec<VarID>, // remap This/Self to reflect concrete type
     pub body: Vec<OPID>,
     pub builtin: bool,

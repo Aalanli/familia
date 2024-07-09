@@ -1,0 +1,9 @@
+fn bar(a: i32, b: i32): i32 {
+    let c = (a + 1);
+    let d = (b + 1);
+    return (c + d);
+}
+
+fn main() {
+    (to_str(1));
+}
