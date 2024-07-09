@@ -8,10 +8,7 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::{Linkage, Module};
-use inkwell::types::{
-    BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType,
-    StructType,
-};
+use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType, StructType};
 use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::{AddressSpace, OptimizationLevel};
 
@@ -26,17 +23,17 @@ use ir::IR;
 macro_rules! include_cstr {
     ( $path:literal $(,)? ) => {{
         // Use a constant to force the verification to run at compile time.
-        const VALUE: &'static ::core::ffi::CStr =
-            match ::core::ffi::CStr::from_bytes_with_nul(concat!(include_str!($path), "\0").as_bytes()) {
-                Ok(value) => value,
-                Err(_) => panic!(concat!("interior NUL byte(s) in `", $path, "`")),
-            };
+        const VALUE: &'static ::core::ffi::CStr = match ::core::ffi::CStr::from_bytes_with_nul(
+            concat!(include_str!($path), "\0").as_bytes(),
+        ) {
+            Ok(value) => value,
+            Err(_) => panic!(concat!("interior NUL byte(s) in `", $path, "`")),
+        };
         VALUE
     }};
 }
 
 const RTS_LL: &'static ::core::ffi::CStr = include_cstr!("rts.ll");
-
 
 fn add_rts(context: &Context) -> Module {
     let buf = MemoryBuffer::create_from_memory_range(RTS_LL.to_bytes(), "rts_ll");
@@ -48,7 +45,6 @@ fn test_add_rts() {
     let context = Context::create();
     add_rts(&context);
 }
-
 
 struct IRState<'ir> {
     ir: &'ir IR,
@@ -679,7 +675,7 @@ pub fn generate_llvm(ir: &ir::IR, options: &mut CodeGenOptions) {
         let rts = add_rts(&context);
         codegen.module.link_in_module(rts).unwrap();
     }
-    
+
     if let OptLevel::O1 = options.opt_level {
         run_passes_on(&codegen.module);
     }
@@ -687,10 +683,12 @@ pub fn generate_llvm(ir: &ir::IR, options: &mut CodeGenOptions) {
     if options.write_obj {
         get_obj(&codegen.module, &mut options.output);
     } else {
-        options.output.write_all(codegen.module.print_to_string().to_bytes()).unwrap();
+        options
+            .output
+            .write_all(codegen.module.print_to_string().to_bytes())
+            .unwrap();
     }
 }
-
 
 pub fn dump_llvm(ir: &ir::IR, opt_level: OptLevel) -> String {
     let mut str = vec![];
@@ -700,25 +698,23 @@ pub fn dump_llvm(ir: &ir::IR, opt_level: OptLevel) -> String {
         write_obj: false,
         output: &mut str,
     };
-    
-    generate_llvm(ir, &mut options);    
+
+    generate_llvm(ir, &mut options);
     String::from_utf8(str).unwrap()
 }
 
-
 #[cfg(test)]
 mod tests {
+    use super::*;
     use inkwell::llvm_sys::core;
     use inkwell::types::{AsTypeRef, PointerType};
     use inkwell::AddressSpace;
-    use super::*;
     fn make_pointer_type<'a>(ty: BasicTypeEnum<'a>) -> PointerType<'a> {
         unsafe {
             let ptr_ty = core::LLVMPointerType(ty.as_type_ref(), 0);
             PointerType::new(ptr_ty)
         }
     }
-
 
     #[test]
     fn test_struct() {

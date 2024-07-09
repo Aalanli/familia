@@ -48,7 +48,7 @@ fn main() {
         OptLevel::O1 => codegen::OptLevel::O1,
     };
     frontend::transform_ir(&mut ir).unwrap();
-    
+
     let mut ostream = if let Some(output) = args.output {
         Box::new(std::fs::File::create(output).unwrap()) as Box<dyn Write>
     } else if let Mode::Object = args.mode {
@@ -58,7 +58,9 @@ fn main() {
     };
 
     match args.mode {
-        Mode::DumpIR => ostream.write_all(frontend::ir::print_basic(&ir).as_bytes()).unwrap(),
+        Mode::DumpIR => ostream
+            .write_all(frontend::ir::print_basic(&ir).as_bytes())
+            .unwrap(),
         Mode::DumpLLVM => {
             let mut options = codegen::CodeGenOptions {
                 opt_level: opt,
@@ -67,7 +69,7 @@ fn main() {
                 output: &mut ostream,
             };
             codegen::generate_llvm(&ir, &mut options)
-        },
+        }
         Mode::Object => {
             let mut options = codegen::CodeGenOptions {
                 opt_level: opt,
