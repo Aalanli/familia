@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, fmt::Display, rc::Rc};
+use std::{collections::VecDeque, fmt::Display};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct Span {

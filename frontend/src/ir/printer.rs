@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::{collections::HashMap};
 
 use super::*;
 
@@ -10,7 +10,7 @@ impl Doc {
         unimplemented!()
     }
 
-    fn push_head(&mut self, s: &str) {
+    fn push_head(&mut self, _s: &str) {
         unimplemented!()
     }
 
@@ -18,7 +18,7 @@ impl Doc {
         unimplemented!()
     }
 
-    fn push_tail(&mut self, s: &str) {
+    fn push_tail(&mut self, _s: &str) {
         unimplemented!()
     }
 }

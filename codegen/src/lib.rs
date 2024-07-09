@@ -626,7 +626,7 @@ fn make_pointer_type<'a>(ty: BasicTypeEnum<'a>) -> PointerType<'a> {
 
 #[cfg(test)]
 mod tests {
-    use inkwell::{context, AddressSpace};
+    use inkwell::{AddressSpace};
 
     use super::*;
     #[test]
@@ -666,7 +666,7 @@ mod tests {
         builder1.build_return(None).unwrap();
         builder2.build_return(None).unwrap();
 
-        let module_str = module.print_to_string().to_string();
+        let _module_str = module.print_to_string().to_string();
         // println!("{}", module_str);
     }
 
@@ -703,8 +703,8 @@ mod tests {
         let entry = context.append_basic_block(func, "entry");
         let builder = context.create_builder();
         builder.position_at_end(entry);
-        let a = func.get_nth_param(0).unwrap();
-        let b = func.get_nth_param(1).unwrap();
+        let _a = func.get_nth_param(0).unwrap();
+        let _b = func.get_nth_param(1).unwrap();
         let a = context.f128_type().const_float(1.0);
         let b = context.i32_type().const_int(1, false);
 
@@ -801,7 +801,7 @@ mod tests {
     fn test_build_vtable() {
         let context = Context::create();
         let module = context.create_module("test");
-        let builder = context.create_builder();
+        let _builder = context.create_builder();
 
         let vtable_ty = context.struct_type(
             &[

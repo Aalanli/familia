@@ -15,7 +15,7 @@ pub struct PrimitiveRegistry {
 }
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap},
     hash::Hash,
     rc::Rc,
 };
@@ -219,7 +219,7 @@ impl Query for VarTypeQuery {
                 ir::ConstKind::IArray(_) => unimplemented!(),
             },
             ir::OPKind::Let { value } => q.query(VarTypeQuery(*value)).unwrap()?,
-            &ir::OPKind::ClsCtor { cls, arg } => {
+            &ir::OPKind::ClsCtor { cls, arg: _ } => {
                 let impl_cls = ir.get(cls);
                 if impl_cls.for_itf.is_none() {
                     return Err(ProgramError {
@@ -488,12 +488,12 @@ pub struct TypeGCAttr {
 
 fn add_gc_mark_root(
     ir: &ir::IR,
-    rts_registry: &RTSRegistry,
+    _rts_registry: &RTSRegistry,
     tyid: ir::TypeID,
-    ops: &mut Vec<ir::OPID>,
-    var: ir::VarID,
+    _ops: &mut Vec<ir::OPID>,
+    _var: ir::VarID,
 ) {
-    let ty = ir.get(tyid);
+    let _ty = ir.get(tyid);
     // match &ty.kind {
     //     ir::TypeKind::I32 => {}
     //     ir::TypeKind::Void => {}
@@ -507,7 +507,7 @@ fn add_gc_mark_root(
     // }
 }
 
-fn add_gc_ty_attrs(ir: &mut ir::IR) {}
+fn add_gc_ty_attrs(_ir: &mut ir::IR) {}
 
 fn lower_to_rts(ir: &mut ir::IR) -> PhaseResult<()> {
     let prim = ir.get_global::<PrimitiveRegistry>().unwrap().clone();

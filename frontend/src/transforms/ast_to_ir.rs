@@ -189,7 +189,7 @@ fn check_basic<'a>(src: &'a ModSource, ast: &Decl) -> PhaseResult<()> {
                 }
             }
             if let ast::DeclKind::InterfaceImpl {
-                name,
+                name: _,
                 sub_decls: body,
             } = &decl.kind
             {
@@ -449,9 +449,9 @@ fn construct_types<'a>(state: &mut LowerModule<'a>, ty_decl: &'a ast::Type) -> O
 
 fn visit_module<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Option<ir::ModuleID> {
     if let ast::DeclKind::Module {
-        name,
-        file,
-        top,
+        name: _,
+        file: _,
+        top: _,
         decls,
     } = &decl.kind
     {
