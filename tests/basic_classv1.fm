@@ -1,0 +1,26 @@
+interface Foo {
+    fn foo(this, a: i32): Self
+}
+type B = { a: i32 }
+class Bar for Foo(B) {
+    fn foo(this, a: i32): Self {
+        print(to_str(a));
+        this.a = (a + 1);
+        return this;
+    }
+}
+interface Baz {
+    fn baz(this, a: Self): Self
+}
+
+class Qux for Baz(B) {
+    fn baz(this, a: Self): Self {
+        this.a = (this.a + 1);
+        return a.baz(Qux(this));
+    }
+}
+
+fn main() {
+    let b = Bar({a: 3});
+    b.foo(1);
+}

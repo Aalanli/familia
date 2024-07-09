@@ -21,7 +21,7 @@ use ir::IR;
 
 struct IRState<'ir> {
     ir: &'ir IR,
-    namer: ir::IRNamer,
+    namer: ir::IRNamer<'ir>,
 }
 
 impl<'ir> IRState<'ir> {
@@ -374,16 +374,18 @@ fn codegen_call<'ctx, 'ir>(
     res: Option<ir::VarID>,
 ) {
     let func = code.get_fn_val(ir, func);
+    println!("{}", func.get_name().to_str().unwrap());
 
     let args = args
         .iter()
         .enumerate()
         .map(|(i, &arg)| {
             let ptr = code.var_ids[&arg];
+            println!("gen {i}");
 
             let arg_ty = code.get_var_type(ir, arg);
-            let expected_arg_ty = func.get_nth_param(i as u32).unwrap().get_type();
-            if arg_ty != expected_arg_ty {
+            let expected_arg_ty = func.get_nth_param(i as u32).unwrap();
+            if arg_ty != expected_arg_ty.get_type() {
                 panic!("expected arg type {:?}, got {:?}", expected_arg_ty, arg_ty);
             }
             let arg_val = code.builder.build_load(arg_ty, ptr, "").unwrap();
@@ -874,6 +876,7 @@ mod tests {
             fn foo(a: T, b: i32): i32 {
                 return (a.a + b);
             }
+            fn main() {}
         ",
         );
 
@@ -892,8 +895,12 @@ mod tests {
                 let d = (b + 1);
                 return (c + d);
             }
+            fn main() {
+                (to_str(1));
+            }
         ",
         );
+        println!("{}", ir::print_basic(&ir));
 
         let llvm = generate_llvm(&ir, Default::default()).unwrap();
         println!("{}", llvm);

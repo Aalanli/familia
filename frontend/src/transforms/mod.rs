@@ -414,6 +414,11 @@ lazy_static! {
             ret_ty: ir::TypeKind::Void,
         },
         RTSFnProto {
+            name: "__rts_gc_alloc",
+            arg_tys: vec![ir::TypeKind::I32],
+            ret_ty: ir::TypeKind::Ptr(None),
+        },
+        RTSFnProto {
             name: "__rts_new_string",
             arg_tys: vec![ir::TypeKind::I32, ir::TypeKind::Ptr(None)],
             ret_ty: ir::TypeKind::String,
@@ -510,10 +515,43 @@ fn add_gc_mark_root(
 fn add_gc_ty_attrs(_ir: &mut ir::IR) {}
 
 fn lower_to_rts(ir: &mut ir::IR) -> PhaseResult<()> {
-    let prim = ir.get_global::<PrimitiveRegistry>().unwrap().clone();
-    let rts = ir.get_global::<RTSRegistry>().unwrap();
-    let src = ir.get_global::<ir::ModuleID>().unwrap();
-    let src = ir.get(*src).src.clone().unwrap();
+    let mut prim = ir.get_global::<PrimitiveRegistry>().unwrap().clone();
+    let rts = ir.get_global::<RTSRegistry>().unwrap().clone();
+    let src = *ir.get_global::<ir::ModuleID>().unwrap();
+    { // insert gc init and destroy
+        let main_fn = ir.get(src).main.unwrap();
+        let fn_span = ir.get(main_fn).decl.span;
+        let init = ir.insert(ir::OP {
+            kind: ir::OPKind::Call {
+                func: rts.fns["__rts_gc_init"],
+                args: vec![],
+            },
+            span: fn_span,
+            res: Some(ir.insert(ir::Var {
+                ty: Some(prim.void),
+                span: None,
+                name: ir::SymbolID::insert(ir, ""),
+            }))
+        });
+        let destroy = ir.insert(ir::OP {
+            kind: ir::OPKind::Call {
+                func: rts.fns["__rts_gc_destroy"],
+                args: vec![],
+            },
+            span: fn_span,
+            res: Some(ir.insert(ir::Var {
+                ty: Some(prim.void),
+                span: None,
+                name: ir::SymbolID::insert(ir, ""),
+            })),
+        });
+        let f = ir.get_mut(main_fn);
+        f.body.insert(0, init);
+        f.body.push(destroy);
+    }
+
+
+    let src = ir.get(src).src.clone().unwrap();
     let mut op_remap = HashMap::new();
     for fs in ir.iter::<ir::FuncID>() {
         let f = ir.get(fs);
@@ -584,6 +622,9 @@ fn lower_to_rts(ir: &mut ir::IR) -> PhaseResult<()> {
     }
     ir.delete(prim.fns["print"]);
     ir.delete(prim.fns["to_str"]);
+    prim.fns.remove("print");
+    prim.fns.remove("to_str");
+    *ir.get_global_mut::<PrimitiveRegistry>().unwrap() = prim;
 
     src.commit_error(())
 }

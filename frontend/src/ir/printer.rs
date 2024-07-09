@@ -1,4 +1,7 @@
-use std::{collections::HashMap};
+use std::cell::{Ref, RefCell};
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::rc::Rc;
 
 use super::*;
 
@@ -42,20 +45,59 @@ pub fn print_basic(ir: &IR) -> String {
     printer.print_ir()
 }
 
-pub struct IRNamer {
-    fn_names: HashMap<FuncID, String>,
-    type_prefix_ids: HashMap<TypeDeclID, String>,
-    type_decl_tys: HashMap<TypeID, TypeDeclID>,
-    class_prefix_ids: HashMap<ClassID, String>,
-    itf_prefix_ids: HashMap<InterfaceID, String>,
-    var_prefix: HashMap<VarID, String>,
-    global_prefix: HashMap<GlobalConstID, String>,
+struct CachedNamer<'ir, T> {
+    names: RefCell<HashMap<T, Rc<str>>>,
+    prefixes: RefCell<HashMap<Rc<str>, u32>>,
+    f: Box<dyn Fn(T) -> String + 'ir>,
 }
 
-impl IRNamer {
-    pub fn new(ir: &IR) -> Self {
+impl<'ir, T: Hash + Eq + Clone> CachedNamer<'ir, T> {
+    fn new(f: impl Fn(T) -> String + 'ir) -> Self {
+        CachedNamer {
+            names: RefCell::new(HashMap::new()),
+            prefixes: RefCell::new(HashMap::new()),
+            f: Box::new(f),
+        }
+    }
+
+    fn name(&self, id: T) -> Rc<str> {
+        if let Some(name) = self.names.borrow().get(&id) {
+            return name.clone();
+        }
+        let name = (*self.f)(id.clone());
+        let name = Rc::from(name);
+        let name_str: &str = &*name;
+        let mut prefix = self.prefixes.borrow_mut();
+        let mut names = self.names.borrow_mut();
+        if !prefix.contains_key(name_str) {
+            prefix.insert(name.clone(), 0);
+            let name = if name_str == "" { Rc::from("0") } else {name};
+            names.insert(id.clone(), name.clone());
+            return name;
+        }
+        let i = prefix.get_mut(name_str).unwrap();
+        *i += 1;
+        let new_name: Rc<str> = Rc::from(format!("{}{}", name_str, i));
+        names.insert(id.clone(), new_name.clone());
+        new_name
+    }
+}
+
+
+pub struct IRNamer<'ir> {
+    fn_names: CachedNamer<'ir, FuncID>,
+    type_prefix_ids: CachedNamer<'ir, TypeDeclID>,
+    type_decl_tys: HashMap<TypeID, TypeDeclID>,
+    class_prefix_ids: CachedNamer<'ir, ClassID>,
+    itf_prefix_ids: CachedNamer<'ir, InterfaceID>,
+    var_prefix: CachedNamer<'ir, VarID>,
+    global_prefix: CachedNamer<'ir, GlobalConstID>,
+}
+
+impl<'ir> IRNamer<'ir> {
+    pub fn new(ir: &'ir IR) -> Self {
         IRNamer {
-            fn_names: Self::compute_id_name(ir, |id: FuncID| {
+            fn_names: CachedNamer::new(|id: FuncID| {
                 ir.get(id).decl.name.get_str(ir).into()
             }),
             type_prefix_ids: Self::compute_id_name(ir, |id: TypeDeclID| {
@@ -68,69 +110,60 @@ impl IRNamer {
                     (ty.decl, id)
                 })
                 .collect::<HashMap<_, _>>(),
-            class_prefix_ids: Self::compute_id_name(ir, |id: ClassID| {
+            class_prefix_ids: CachedNamer::new(|id: ClassID| {
                 ir.get(id).name.get_str(ir).into()
             }),
-            itf_prefix_ids: Self::compute_id_name(ir, |id: InterfaceID| {
+            itf_prefix_ids: CachedNamer::new(|id: InterfaceID| {
                 ir.get(id).name.get_str(ir).into()
             }),
-            var_prefix: Self::compute_id_name(ir, |id: VarID| ir.get(id).name.get_str(ir).into()),
+            var_prefix: CachedNamer::new(|id: VarID| ir.get(id).name.get_str(ir).into()),
             global_prefix: Self::compute_id_name(ir, |id: GlobalConstID| {
                 ir.get(ir.get(id).var).name.get_str(ir).into()
             }),
         }
     }
 
-    fn compute_id_name<T: ID>(ir: &IR, prefix: impl Fn(T) -> String) -> HashMap<T, String> {
-        let mut inserted = HashMap::new();
-        let mut names = HashMap::new();
+    fn compute_id_name<T: ID>(ir: &'ir IR, prefix: impl Fn(T) -> String + 'ir) -> CachedNamer<'ir, T> {
+        let mut names = CachedNamer::new(prefix);
         for id in ir.iter_stable::<T>() {
-            let name = prefix(id);
-            if !inserted.contains_key(&name) {
-                inserted.insert(name.to_string(), 0);
-                names.insert(id, if name == "" { "0".to_string() } else { name });
-            } else {
-                let count = inserted.get_mut(&name).unwrap();
-                *count += 1;
-                names.insert(id, format!("{}{}", name, count));
-            }
+            names.name(id);
         }
         names
     }
 
-    pub fn name_type_decl(&self, ty: TypeDeclID) -> &str {
-        self.type_prefix_ids[&ty].as_str()
+    pub fn name_type_decl(&self, ty: TypeDeclID) -> Rc<str> {
+        self.type_prefix_ids.name(ty)
     }
 
-    pub fn try_name_type(&self, ty: TypeID) -> Option<&str> {
+    pub fn try_name_type(&self, ty: TypeID) -> Option<Rc<str>> {
         self.type_decl_tys
             .get(&ty)
             .map(|decl| self.name_type_decl(*decl))
     }
 
-    pub fn name_var(&self, var: VarID) -> &str {
-        self.var_prefix[&var].as_str()
+    pub fn name_var(&self, var: VarID) -> Rc<str> {
+        self.var_prefix.name(var)
     }
 
-    pub fn name_func(&self, func: FuncID) -> &str {
-        self.fn_names[&func].as_str()
+    pub fn name_func(&self, func: FuncID) -> Rc<str> {
+        self.fn_names.name(func)
     }
 
-    pub fn name_class(&self, class: ClassID) -> &str {
-        self.class_prefix_ids[&class].as_str()
+    pub fn name_class(&self, class: ClassID) -> Rc<str> {
+        self.class_prefix_ids.name(class)
     }
 
-    pub fn name_interface(&self, itf: InterfaceID) -> &str {
-        self.itf_prefix_ids[&itf].as_str()
+    pub fn name_interface(&self, itf: InterfaceID) -> Rc<str> {
+        self.itf_prefix_ids.name(itf)
     }
 
-    pub fn name_global(&self, global: GlobalConstID) -> &str {
-        self.global_prefix[&global].as_str()
+    pub fn name_global(&self, global: GlobalConstID) -> Rc<str> {
+        self.global_prefix.name(global)
     }
 }
 
 pub struct BasicPrinter<'ir> {
-    ir_namer: IRNamer,
+    ir_namer: IRNamer<'ir>,
     ir: &'ir IR,
 }
 
@@ -309,7 +342,7 @@ impl<'ir> BasicPrinter<'ir> {
         format!("{}{}", name, args)
     }
 
-    pub fn print_function(&self, func_id: FuncID) -> String {
+    pub fn print_function(&self, func_id: FuncID, parent: Option<impl AsRef<str>>) -> String {
         let func = self.ir.get(func_id);
         let args = if func.builtin {
             arg_list(
@@ -335,23 +368,25 @@ impl<'ir> BasicPrinter<'ir> {
             .map(|op| self.print_op(op))
             .collect::<Vec<_>>()
             .join("\n ");
-
-        format!("fn @{}{}: {} {{\n {body}\n}}  ", prefix, args, ret_ty,)
+        if let Some(par) = parent {
+            let par: &str = par.as_ref();
+            format!("fn @{}{}: {} [parent={par}] {{\n {body}\n}}  ", prefix, args, ret_ty,)
+        } else {
+            format!("fn @{}{}: {} {{\n {body}\n}}  ", prefix, args, ret_ty,)
+        }
     }
 
-    pub fn print_function_stub(&self, func: FuncID) -> String {
-        let fimpl = self.ir.get(func);
+    pub fn print_function_stub(&self, func: &FuncDecl, prefix: &str) -> String {
         let args =
             arg_list(
                 "(",
                 ")",
                 ", ",
-                fimpl.decl.args.iter().map(|(name, ty)| {
+                func.args.iter().map(|(name, ty)| {
                     format!("{}: {}", name.get_str(&self.ir), self.print_type(*ty))
                 }),
             );
-        let ret_ty = self.print_type(fimpl.decl.ret_ty);
-        let prefix = self.ir_namer.name_func(func);
+        let ret_ty = self.print_type(func.ret_ty);
         format!("fn @{}{}: {} {{...}}", prefix, args, ret_ty,)
     }
 
@@ -366,10 +401,11 @@ impl<'ir> BasicPrinter<'ir> {
         str += " {\n";
         for methods in class.methods.iter() {
             str += " ";
-            str.push_str(&self.print_function_stub(*methods));
+            let decl = &self.ir.get(*methods).decl;
+            str.push_str(&self.print_function_stub(decl, &decl.name.get_str(self.ir)));
             str += "\n";
         }
-        str += "\n}";
+        str += "}";
         str
     }
 
@@ -382,6 +418,19 @@ impl<'ir> BasicPrinter<'ir> {
         )
     }
 
+    pub fn print_interface(&self, itf_id: InterfaceID) -> String {
+        let itf = self.ir.get(itf_id);
+        let mut str = format!("interface @{}", self.ir_namer.name_interface(itf_id));
+        str += " {\n";
+        for methods in itf.methods.iter() {
+            str += " ";
+            str.push_str(&self.print_function_stub(methods, &methods.name.get_str(self.ir)));
+            str += "\n";
+        }
+        str += "}";
+        str
+    }
+
     pub fn print_ir(&self) -> String {
         let mut lines = Vec::new();
         for id in self.ir.iter_stable::<TypeDeclID>() {
@@ -390,11 +439,19 @@ impl<'ir> BasicPrinter<'ir> {
         for id in self.ir.iter_stable::<GlobalConstID>() {
             lines.push(self.print_global(id));
         }
-        for id in self.ir.iter_stable::<FuncID>() {
-            lines.push(self.print_function(id));
+        let mut fn_to_class = HashMap::new();
+        for id in self.ir.iter_stable::<InterfaceID>() {
+            lines.push(self.print_interface(id));
         }
         for id in self.ir.iter_stable::<ClassID>() {
+            for method in self.ir.get(id).methods.iter() {
+                fn_to_class.insert(*method, id);
+            }
             lines.push(self.print_class(id));
+        }
+        for id in self.ir.iter_stable::<FuncID>() {
+            let parent = fn_to_class.get(&id).map(|id| self.ir_namer.name_class(*id));
+            lines.push(self.print_function(id, parent));
         }
         lines.push(String::new());
         lines.join("\n")
