@@ -14,11 +14,7 @@ pub struct PrimitiveRegistry {
     pub fns: HashMap<String, ir::FuncID>,
 }
 
-use std::{
-    collections::{HashMap},
-    hash::Hash,
-    rc::Rc,
-};
+use std::{collections::HashMap, hash::Hash, rc::Rc};
 
 use either::Either;
 use lazy_static::lazy_static;
@@ -309,7 +305,7 @@ fn subsititute_cls_repr_type(ir: &mut ir::IR) -> PhaseResult<()> {
     let self_ = ir::TypeID::self_(ir);
     let src = ir.get_global::<ir::ModuleID>().unwrap();
     let src = ir.get(*src).src.clone().unwrap();
-    
+
     let mut need_remap = vec![];
     for id in ir.iter::<ir::ClassID>() {
         let cls = ir.get(id);
@@ -528,7 +524,8 @@ fn lower_to_rts(ir: &mut ir::IR) -> PhaseResult<()> {
     let mut prim = ir.get_global::<PrimitiveRegistry>().unwrap().clone();
     let rts = ir.get_global::<RTSRegistry>().unwrap().clone();
     let src = *ir.get_global::<ir::ModuleID>().unwrap();
-    { // insert gc init and destroy
+    {
+        // insert gc init and destroy
         let main_fn = ir.get(src).main.unwrap();
         let fn_span = ir.get(main_fn).decl.span;
         let init = ir.insert(ir::OP {
@@ -541,7 +538,7 @@ fn lower_to_rts(ir: &mut ir::IR) -> PhaseResult<()> {
                 ty: Some(prim.void),
                 span: None,
                 name: ir::SymbolID::insert(ir, ""),
-            }))
+            })),
         });
         let destroy = ir.insert(ir::OP {
             kind: ir::OPKind::Call {
@@ -559,7 +556,6 @@ fn lower_to_rts(ir: &mut ir::IR) -> PhaseResult<()> {
         f.body.insert(0, init);
         f.body.push(destroy);
     }
-
 
     let src = ir.get(src).src.clone().unwrap();
     let mut op_remap = HashMap::new();

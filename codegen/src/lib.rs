@@ -6,7 +6,7 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{
-    AsTypeRef, BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType, PointerType,
+    BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType,
     StructType,
 };
 use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
@@ -123,7 +123,10 @@ impl<'ctx> CodeGenState<'ctx> {
         }
         let var_ty = var.type_of(&ir.ir);
         let ty = self.get_repr_type(ir, var_ty);
-        let alloca = self.builder.build_alloca(ty, &*ir.namer().name_var(var)).unwrap();
+        let alloca = self
+            .builder
+            .build_alloca(ty, &*ir.namer().name_var(var))
+            .unwrap();
         self.var_ids.insert(var, alloca);
         alloca
     }
@@ -244,7 +247,8 @@ fn get_fn_type<'ctx, 'ir>(
     let func = ir.get(func_id);
     let fn_type;
     let arg_types = func
-        .decl.args
+        .decl
+        .args
         .iter()
         .map(|(_, t)| code.get_repr_type(ir, *t).into())
         .collect::<Vec<_>>();
@@ -448,7 +452,10 @@ fn codegen_struct<'ctx, 'ir>(
 ) {
     let struct_ty = code.get_shallow_struct_type(ir, res.type_of(&ir)).unwrap();
     let size = struct_ty.size_of().unwrap();
-    let size = code.builder.build_int_cast(size, code.context.i32_type(), "").unwrap();
+    let size = code
+        .builder
+        .build_int_cast(size, code.context.i32_type(), "")
+        .unwrap();
     let gc_alloc = code.get_rts_fn(ir, "__rts_gc_alloc");
 
     // TODO: the first argument should be the configuration struct specifying
@@ -481,7 +488,7 @@ fn codegen_cls_ctor<'ctx, 'ir>(
     ir: &IRState<'ir>,
     cls: ir::ClassID,
     arg: ir::VarID,
-    res: ir::VarID
+    res: ir::VarID,
 ) {
     let vtable_ptr = code.build_vtable(ir, cls);
     let data = code.load_var(ir, arg).into_pointer_value();
@@ -496,7 +503,7 @@ fn codegen_methodcall<'ctx, 'ir>(
     obj: ir::VarID,
     method: ir::SymbolID,
     args: &[ir::VarID],
-    res_var: ir::VarID
+    res_var: ir::VarID,
 ) {
     let itf = ir.get(obj).ty.unwrap();
     let ir::TypeKind::Itf(itf) = ir.get(itf).kind else {
@@ -631,11 +638,10 @@ pub fn generate_llvm(ir: &ir::IR, opt_level: OptLevel) -> Result<String> {
     Ok(codegen.module.to_string())
 }
 
-
 #[cfg(test)]
 mod tests {
-    use inkwell::{AddressSpace};
     use inkwell::llvm_sys::core;
+    use inkwell::AddressSpace;
     fn make_pointer_type<'a>(ty: BasicTypeEnum<'a>) -> PointerType<'a> {
         unsafe {
             let ptr_ty = core::LLVMPointerType(ty.as_type_ref(), 0);
