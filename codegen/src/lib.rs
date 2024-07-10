@@ -1,4 +1,3 @@
-use std::borrow::{Borrow, BorrowMut};
 use std::collections::HashMap;
 use std::io::Write;
 use std::ops::Deref;
@@ -6,45 +5,22 @@ use std::ops::Deref;
 use familia_frontend::transforms::RTSRegistry;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
-use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType, StructType};
 use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::{AddressSpace, OptimizationLevel};
 
-use anyhow::Result;
 use either::Either;
 
 use familia_frontend as frontend;
 use familia_frontend::ir;
 use frontend::transforms::PrimitiveRegistry;
 use ir::IR;
+mod rts;
+use rts::add_rts;
+mod utils;
+pub use utils::object_to_executable;
 
-macro_rules! include_cstr {
-    ( $path:literal $(,)? ) => {{
-        // Use a constant to force the verification to run at compile time.
-        const VALUE: &'static ::core::ffi::CStr = match ::core::ffi::CStr::from_bytes_with_nul(
-            concat!(include_str!($path), "\0").as_bytes(),
-        ) {
-            Ok(value) => value,
-            Err(_) => panic!(concat!("interior NUL byte(s) in `", $path, "`")),
-        };
-        VALUE
-    }};
-}
-
-const RTS_LL: &'static ::core::ffi::CStr = include_cstr!("rts.ll");
-
-fn add_rts(context: &Context) -> Module {
-    let buf = MemoryBuffer::create_from_memory_range(RTS_LL.to_bytes(), "rts_ll");
-    context.create_module_from_ir(buf).unwrap()
-}
-
-#[test]
-fn test_add_rts() {
-    let context = Context::create();
-    add_rts(&context);
-}
 
 struct IRState<'ir> {
     ir: &'ir IR,
@@ -716,6 +692,138 @@ mod tests {
         }
     }
 
+    fn run_frontend(s: &str) -> ir::IR {
+        let src = s.into();
+        let ast = frontend::parse(&src).unwrap();
+        let mut ir = frontend::ast_to_ir(src, ast).unwrap();
+        frontend::transform_ir(&mut ir).unwrap();
+        ir
+    }
+
+    #[test]
+    fn test_codegen1() {
+        let ir = run_frontend(
+            "\
+            type T = {a: i32, b: i32}
+            fn foo(a: T, b: i32): i32 {
+                return (a.a + b);
+            }
+            fn main() {}
+        ",
+        );
+
+        println!("{}", ir::print_basic(&ir));
+
+        let llvm = dump_llvm(&ir, OptLevel::None);
+        println!("{}", llvm);
+    }
+
+    #[test]
+    fn test_codegen2() {
+        let ir = run_frontend(
+            "\
+            fn bar(a: i32, b: i32): i32 {
+                let c = (a + 1);
+                let d = (b + 1);
+                return (c + d);
+            }
+            fn main() {
+                (to_str(1));
+            }
+        ",
+        );
+        println!("{}", ir::print_basic(&ir));
+
+        let llvm = dump_llvm(&ir, OptLevel::None);
+        println!("{}", llvm);
+    }
+
+    #[test]
+    fn test_codegen3() {
+        let ir = run_frontend(
+            "\
+            type T = {a: i32, b: i32}
+            type R = {a: T}
+            fn foo(a: T): i32 {
+                return a.a;
+            }
+
+            fn bar(a: i32, b: i32): i32 {
+                return a;
+            }
+
+            fn main() {
+                let a = {a: 1, b: 2};
+                // let c = {a: a};
+                // bar(3, a.a);
+                // foo(a);
+
+            }
+        ",
+        );
+        println!("{}", ir::print_basic(&ir));
+        let llvm = dump_llvm(&ir, OptLevel::None);
+        println!("{}", llvm);
+    }
+
+    #[test]
+    fn test_codegen4() {
+        let ir = run_frontend(
+            "\
+            fn foo(a: String): String {
+                let b = to_str(1);
+                let b1 = \"2\";
+                let c = (a + \"1\");
+                print(c);
+                return (b + c);
+            }
+            fn main() {
+                print(foo(\"1\"));
+            }
+            ",
+        );
+        println!("{}", ir::print_basic(&ir));
+        let llvm = dump_llvm(&ir, OptLevel::None);
+        println!("{}", llvm);
+    }
+
+    #[test]
+    fn test_codegen5() {
+        let ir = run_frontend(
+            "\
+            interface Foo {
+                fn foo(this, a: i32): Self
+            }
+            type B = { a: i32 }
+            class Bar for Foo(B) {
+                fn foo(this, a: i32): Self {
+                    print(to_str(a));
+                    this.a = (a + 1);
+                    return this;
+                }
+            }
+            interface Baz {
+                fn baz(this, a: Self): Self
+            }
+
+            class Qux for Baz(B) {
+                fn baz(this, a: Self): Self {
+                    this.a = (this.a + 1);
+                    return a.baz(Qux(this));
+                }
+            }
+
+            fn main() {
+                let b = Bar({a: 3});
+                b.foo(1);
+            }
+            ",
+        );
+        println!("{}", ir::print_basic(&ir));
+        let llvm = dump_llvm(&ir, OptLevel::None);
+        println!("{}", llvm);
+    }
+
     #[test]
     fn test_struct() {
         let context = Context::create();
@@ -943,137 +1051,5 @@ mod tests {
             .unwrap();
 
         println!("{}", module.print_to_string().to_string());
-    }
-
-    fn run_frontend(s: &str) -> ir::IR {
-        let src = s.into();
-        let ast = frontend::parse(&src).unwrap();
-        let mut ir = frontend::ast_to_ir(src, ast).unwrap();
-        frontend::transform_ir(&mut ir).unwrap();
-        ir
-    }
-
-    #[test]
-    fn test_codegen1() {
-        let ir = run_frontend(
-            "\
-            type T = {a: i32, b: i32}
-            fn foo(a: T, b: i32): i32 {
-                return (a.a + b);
-            }
-            fn main() {}
-        ",
-        );
-
-        println!("{}", ir::print_basic(&ir));
-
-        let llvm = dump_llvm(&ir, OptLevel::None);
-        println!("{}", llvm);
-    }
-
-    #[test]
-    fn test_codegen2() {
-        let ir = run_frontend(
-            "\
-            fn bar(a: i32, b: i32): i32 {
-                let c = (a + 1);
-                let d = (b + 1);
-                return (c + d);
-            }
-            fn main() {
-                (to_str(1));
-            }
-        ",
-        );
-        println!("{}", ir::print_basic(&ir));
-
-        let llvm = dump_llvm(&ir, OptLevel::None);
-        println!("{}", llvm);
-    }
-
-    #[test]
-    fn test_codegen3() {
-        let ir = run_frontend(
-            "\
-            type T = {a: i32, b: i32}
-            type R = {a: T}
-            fn foo(a: T): i32 {
-                return a.a;
-            }
-
-            fn bar(a: i32, b: i32): i32 {
-                return a;
-            }
-
-            fn main() {
-                let a = {a: 1, b: 2};
-                // let c = {a: a};
-                // bar(3, a.a);
-                // foo(a);
-
-            }
-        ",
-        );
-        println!("{}", ir::print_basic(&ir));
-        let llvm = dump_llvm(&ir, OptLevel::None);
-        println!("{}", llvm);
-    }
-
-    #[test]
-    fn test_codegen4() {
-        let ir = run_frontend(
-            "\
-            fn foo(a: String): String {
-                let b = to_str(1);
-                let b1 = \"2\";
-                let c = (a + \"1\");
-                print(c);
-                return (b + c);
-            }
-            fn main() {
-                print(foo(\"1\"));
-            }
-            ",
-        );
-        println!("{}", ir::print_basic(&ir));
-        let llvm = dump_llvm(&ir, OptLevel::None);
-        println!("{}", llvm);
-    }
-
-    #[test]
-    fn test_codegen5() {
-        let ir = run_frontend(
-            "\
-            interface Foo {
-                fn foo(this, a: i32): Self
-            }
-            type B = { a: i32 }
-            class Bar for Foo(B) {
-                fn foo(this, a: i32): Self {
-                    print(to_str(a));
-                    this.a = (a + 1);
-                    return this;
-                }
-            }
-            interface Baz {
-                fn baz(this, a: Self): Self
-            }
-
-            class Qux for Baz(B) {
-                fn baz(this, a: Self): Self {
-                    this.a = (this.a + 1);
-                    return a.baz(Qux(this));
-                }
-            }
-
-            fn main() {
-                let b = Bar({a: 3});
-                b.foo(1);
-            }
-            ",
-        );
-        println!("{}", ir::print_basic(&ir));
-        let llvm = dump_llvm(&ir, OptLevel::None);
-        println!("{}", llvm);
     }
 }
