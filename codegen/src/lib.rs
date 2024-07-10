@@ -21,7 +21,6 @@ use rts::add_rts;
 mod utils;
 pub use utils::object_to_executable;
 
-
 struct IRState<'ir> {
     ir: &'ir IR,
     namer: ir::IRNamer<'ir>,
@@ -50,7 +49,6 @@ struct CodeGenState<'ctx> {
     struct_types: HashMap<ir::TypeID, Option<StructType<'ctx>>>,
     vtables: HashMap<ir::ClassID, PointerValue<'ctx>>,
     functions: HashMap<ir::FuncID, FunctionValue<'ctx>>,
-    value_types: HashMap<ir::TypeID, BasicTypeEnum<'ctx>>,
 }
 
 impl<'ctx> CodeGenState<'ctx> {
@@ -65,7 +63,6 @@ impl<'ctx> CodeGenState<'ctx> {
             struct_types: HashMap::new(),
             vtables: HashMap::new(),
             functions: HashMap::new(),
-            value_types: HashMap::new(),
         }
     }
 
@@ -424,6 +421,22 @@ fn codegen_call<'ctx, 'ir>(
     }
 }
 
+fn codegen_get_data<'ctx, 'ir>(
+    code: &mut CodeGenState<'ctx>,
+    ir: &IRState<'ir>,
+    gc_ptr: PointerValue<'ctx>,
+) -> PointerValue<'ctx> {
+    let get_data_fn = code.get_rts_fn(ir, "__rts_get_data");
+    code
+        .builder
+        .build_call(get_data_fn, &[gc_ptr.into()], "get_data")
+        .unwrap()
+        .try_as_basic_value()
+        .left()
+        .unwrap()
+        .into_pointer_value()
+}
+
 fn codegen_getattr<'ctx, 'ir>(
     code: &mut CodeGenState<'ctx>,
     ir: &IRState<'ir>,
@@ -432,12 +445,13 @@ fn codegen_getattr<'ctx, 'ir>(
     res: ir::VarID,
 ) {
     // every struct is allocated on the heap, first remove the stack pointer indirection
-    let obj_val = code.load_var(ir, obj).into_pointer_value();
+    let gc_ptr = code.load_var(ir, obj).into_pointer_value();
+    let obj_ptr = codegen_get_data(code, ir, gc_ptr);
     let struct_ty = code.get_shallow_struct_type(ir, obj.type_of(&ir)).unwrap();
 
     let field = code
         .builder
-        .build_struct_gep(struct_ty, obj_val, idx as u32, "")
+        .build_struct_gep(struct_ty, obj_ptr, idx as u32, "")
         .unwrap();
 
     // this is for the purpose of "foo.bar = 1"
@@ -473,11 +487,12 @@ fn codegen_struct<'ctx, 'ir>(
         .unwrap()
         .into_pointer_value();
 
+    let data_ptr = codegen_get_data(code, ir, gc_ptr);
     for (i, (_, field)) in fields.iter().enumerate() {
         let field_val = code.load_var(ir, *field);
         let field_ptr = code
             .builder
-            .build_struct_gep(struct_ty, gc_ptr, i as u32, "")
+            .build_struct_gep(struct_ty, data_ptr, i as u32, "")
             .unwrap();
         code.builder.build_store(field_ptr, field_val).unwrap();
     }
@@ -519,11 +534,12 @@ fn codegen_methodcall<'ctx, 'ir>(
     );
 
     let obj_val = code.load_var(ir, obj).into_struct_value();
-    let vtable = code
+    let vtable_ptr = code
         .builder
         .build_extract_value(obj_val, 0, "")
         .unwrap()
         .into_pointer_value();
+    let vtable = code.builder.build_load(code.context.ptr_type(AddressSpace::default()), vtable_ptr, "vtable_ptr").unwrap().into_pointer_value();
     let data = code
         .builder
         .build_extract_value(obj_val, 1, "")

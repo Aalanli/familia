@@ -1,6 +1,6 @@
 use inkwell::context::Context;
-use inkwell::module::Module;
 use inkwell::memory_buffer::MemoryBuffer;
+use inkwell::module::Module;
 
 macro_rules! include_cstr {
     ( $path:literal $(,)? ) => {{

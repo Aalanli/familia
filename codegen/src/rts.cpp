@@ -66,6 +66,8 @@ void __rts_gc_init() {
 
 void __rts_gc_destroy() {
     delete gc;
+    // todo find more elegant solution for exiting success
+    exit(0);
 }
 
 AllocPtr* __rts_gc_alloc(TraceConfig* config, int bytes) {

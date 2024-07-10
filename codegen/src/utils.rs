@@ -11,4 +11,3 @@ pub fn object_to_executable(object_file: &str, executable_file: &str) {
         .expect("failed to execute process");
     assert!(output.status.success());
 }
-

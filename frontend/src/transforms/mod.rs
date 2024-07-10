@@ -96,11 +96,11 @@ impl Query for GetAttrIdxQuery {
     }
 }
 
-fn get_fn_type(ir: &ir::IR, fdecl: &ir::FuncDecl) -> ir::TypeID {
-    let args = fdecl.args.iter().map(|(_, ty)| *ty).collect::<Vec<_>>();
-    let ret_ty = fdecl.ret_ty;
-    ir::TypeID::insert(ir, ir::TypeKind::Fn(args, ret_ty))
-}
+// fn get_fn_type(ir: &ir::IR, fdecl: &ir::FuncDecl) -> ir::TypeID {
+//     let args = fdecl.args.iter().map(|(_, ty)| *ty).collect::<Vec<_>>();
+//     let ret_ty = fdecl.ret_ty;
+//     ir::TypeID::insert(ir, ir::TypeKind::Fn(args, ret_ty))
+// }
 
 fn has_itf_repr_ty(ir: &ir::IR, itf: ir::InterfaceID) -> bool {
     let itf = ir.get(itf);
@@ -425,6 +425,11 @@ lazy_static! {
             ret_ty: ir::TypeKind::Ptr(None),
         },
         RTSFnProto {
+            name: "__rts_get_data",
+            arg_tys: vec![ir::TypeKind::Ptr(None)],
+            ret_ty: ir::TypeKind::Ptr(None),
+        },
+        RTSFnProto {
             name: "__rts_new_string",
             arg_tys: vec![ir::TypeKind::I32, ir::TypeKind::Ptr(None)],
             ret_ty: ir::TypeKind::String,
@@ -497,28 +502,28 @@ pub struct TypeGCAttr {
     pub gc_pop_root: ir::FuncID,
 }
 
-fn add_gc_mark_root(
-    ir: &ir::IR,
-    _rts_registry: &RTSRegistry,
-    tyid: ir::TypeID,
-    _ops: &mut Vec<ir::OPID>,
-    _var: ir::VarID,
-) {
-    let _ty = ir.get(tyid);
-    // match &ty.kind {
-    //     ir::TypeKind::I32 => {}
-    //     ir::TypeKind::Void => {}
-    //     ir::TypeKind::String => {
-    //         ops.push(ir::OPID::insert(ir, ir::OPKind::Call {
-    //             func: rts_registry.fns["__rts_gc_mark_root"],
-    //             args: vec![var],
-    //             ret
-    //         }));
-    //     }
-    // }
-}
+// fn add_gc_mark_root(
+//     ir: &ir::IR,
+//     _rts_registry: &RTSRegistry,
+//     tyid: ir::TypeID,
+//     _ops: &mut Vec<ir::OPID>,
+//     _var: ir::VarID,
+// ) {
+//     let _ty = ir.get(tyid);
+//     // match &ty.kind {
+//     //     ir::TypeKind::I32 => {}
+//     //     ir::TypeKind::Void => {}
+//     //     ir::TypeKind::String => {
+//     //         ops.push(ir::OPID::insert(ir, ir::OPKind::Call {
+//     //             func: rts_registry.fns["__rts_gc_mark_root"],
+//     //             args: vec![var],
+//     //             ret
+//     //         }));
+//     //     }
+//     // }
+// }
 
-fn add_gc_ty_attrs(_ir: &mut ir::IR) {}
+// fn add_gc_ty_attrs(_ir: &mut ir::IR) {}
 
 fn lower_to_rts(ir: &mut ir::IR) -> PhaseResult<()> {
     let mut prim = ir.get_global::<PrimitiveRegistry>().unwrap().clone();

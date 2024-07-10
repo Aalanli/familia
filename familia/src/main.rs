@@ -19,7 +19,7 @@ struct Cli {
     output: Option<String>,
 }
 
-#[derive(Copy, Clone, Debug, ValueEnum)]
+#[derive(Copy, Clone, Debug, ValueEnum, PartialEq, Eq)]
 enum Mode {
     /// dump the ir
     DumpIR,
@@ -50,7 +50,11 @@ fn main() {
     frontend::transform_ir(&mut ir).unwrap();
 
     let (object_file, exe_file) = if let Some(output) = &args.output {
-        (output.to_string() + ".o", output.to_string())
+        if args.mode == Mode::Exe { // remove the object file if we generate an executable
+            (output.to_string() + ".o", output.to_string())
+        } else { // otherwise we just straight up dump the ir/llvm to the file
+            (output.to_string(), output.to_string())
+        }
     } else if let Mode::Exe = args.mode {
         ("a.o".to_string(), "a.out".to_string())
     } else {
@@ -72,7 +76,7 @@ fn main() {
         Mode::DumpLLVM => {
             let mut options = codegen::CodeGenOptions {
                 opt_level: opt,
-                add_rts: true,
+                add_rts: false,
                 write_obj: false,
                 output: &mut ostream,
             };

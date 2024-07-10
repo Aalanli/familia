@@ -18,6 +18,7 @@ fn @main(): () {
 fn @__rts_gc_init(): () { builtin! }
 fn @__rts_gc_destroy(): () { builtin! }
 fn @__rts_gc_alloc(@ptrNone, i32): @ptrNone { builtin! }
+fn @__rts_get_data(@ptrNone): @ptrNone { builtin! }
 fn @__rts_new_string(i32, @ptrNone): String { builtin! }
 fn @__rts_string_length(String): i32 { builtin! }
 fn @__rts_string_data(String): i32 { builtin! }
