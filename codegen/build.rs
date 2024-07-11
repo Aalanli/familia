@@ -11,6 +11,7 @@ fn main() {
         .arg("src/rts.cpp")
         .arg("-o")
         .arg("src/rts.ll")
-        .output().unwrap();
+        .output()
+        .unwrap();
     assert!(stdout.status.success());
 }

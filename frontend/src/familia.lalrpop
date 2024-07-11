@@ -1,4 +1,3 @@
-use std::str::FromStr;
 use crate::ast::{Loc, Ident, Tok, LexError};
 use crate::ast::{
     Expr, ExprKind, 
@@ -7,8 +6,7 @@ use crate::ast::{
     Type, TypeKind, 
     Var, 
     P, 
-    Path,
-    self
+    Path
 };
 
 
@@ -60,7 +58,7 @@ FnDecl : DeclKind = {
 
 ArgList : Vec<Var> = {
     <v: Comma<TypeVar>> => v,
-    <t:ThisVar> <mut args:("," <TypeVar>)*> => {
+    <t:ThisVar> <args:("," <TypeVar>)*> => {
         let mut v = vec![t];
         v.extend(args);
         v

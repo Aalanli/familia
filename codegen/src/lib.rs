@@ -432,8 +432,7 @@ fn codegen_get_data<'ctx, 'ir>(
     gc_ptr: PointerValue<'ctx>,
 ) -> PointerValue<'ctx> {
     let get_data_fn = code.get_rts_fn(ir, "__rts_get_data");
-    code
-        .builder
+    code.builder
         .build_call(get_data_fn, &[gc_ptr.into()], "get_data")
         .unwrap()
         .try_as_basic_value()
@@ -544,7 +543,15 @@ fn codegen_methodcall<'ctx, 'ir>(
         .build_extract_value(obj_val, 0, "")
         .unwrap()
         .into_pointer_value();
-    let vtable = code.builder.build_load(code.context.ptr_type(AddressSpace::default()), vtable_ptr, "vtable_ptr").unwrap().into_pointer_value();
+    let vtable = code
+        .builder
+        .build_load(
+            code.context.ptr_type(AddressSpace::default()),
+            vtable_ptr,
+            "vtable_ptr",
+        )
+        .unwrap()
+        .into_pointer_value();
     let data = code
         .builder
         .build_extract_value(obj_val, 1, "")

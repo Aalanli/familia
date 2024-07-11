@@ -50,9 +50,11 @@ fn main() {
     frontend::transform_ir(&mut ir).unwrap();
 
     let (object_file, exe_file) = if let Some(output) = &args.output {
-        if args.mode == Mode::Exe { // remove the object file if we generate an executable
+        if args.mode == Mode::Exe {
+            // remove the object file if we generate an executable
             (output.to_string() + ".o", output.to_string())
-        } else { // otherwise we just straight up dump the ir/llvm to the file
+        } else {
+            // otherwise we just straight up dump the ir/llvm to the file
             (output.to_string(), output.to_string())
         }
     } else if let Mode::Exe = args.mode {

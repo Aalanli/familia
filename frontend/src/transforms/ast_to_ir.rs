@@ -650,14 +650,17 @@ fn visit_expr(
             return *var_id;
         }
         ast::ExprKind::VoidLit => {
-            let var = ir::VarID::new_var(&state.ir, parent_name, Some(ir::TypeID::void(&state.ir)), Some(expr.span));
-            let op = state.ir.insert(
-                ir::OP {
-                    kind: ir::OPKind::Constant(ir::ConstKind::Void),
-                    span: expr.span,
-                    res: Some(var),
-                }
+            let var = ir::VarID::new_var(
+                &state.ir,
+                parent_name,
+                Some(ir::TypeID::void(&state.ir)),
+                Some(expr.span),
             );
+            let op = state.ir.insert(ir::OP {
+                kind: ir::OPKind::Constant(ir::ConstKind::Void),
+                span: expr.span,
+                res: Some(var),
+            });
             ops.push(op);
             return var;
         }
@@ -743,16 +746,14 @@ fn visit_expr(
                         *state
                             .temp
                             .fn_impl_to_id
-                            .or_insert_with(decl, 
-                                || state.ir.temporary_id())
+                            .or_insert_with(decl, || state.ir.temporary_id())
                     })
                     .unwrap_or_else(|| {
                         assert!(is_builtin_fn(path));
                         get_builtin_fn(path, &state.ir)
                     });
                 // let func_ret = state.ir.get(func_id).decl.ret_ty;
-                let var =
-                    ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
+                let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
                 let id = state.ir.temporary_id();
                 state.ir.insert_with(
                     id,
@@ -892,30 +893,6 @@ fn insert_stmts(
     ops.push(op_id);
 }
 
-fn path_to_type<'a>(state: &mut LowerModule<'a>, path: &'a ast::Path) -> Option<ir::TypeID> {
-    if is_builtin_type(path) {
-        let ty = get_builtin_type(path);
-        if let Err(e) = ty {
-            state.src.add_err(e);
-            return None;
-        }
-        Some(ir::TypeID::insert(&state.ir, ty.unwrap()))
-    } else {
-        let decl = state.path_map.get(path).unwrap();
-        match &decl.kind {
-            ast::DeclKind::TypeDecl { decl, .. } => construct_types(state, decl),
-            _ => {
-                state.src.add_err(ProgramError {
-                    error_message: "expected a type declaration",
-                    span: Some(path.span),
-                    ..Default::default()
-                });
-                None
-            }
-        }
-    }
-}
-
 fn visit_class_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Option<ir::ClassID> {
     if let ast::DeclKind::ClassImpl {
         name,
@@ -1053,7 +1030,6 @@ mod ast_to_ir_test {
             }
         }
     }
-
 
     #[test]
     fn test_check_path() {

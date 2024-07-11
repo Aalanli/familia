@@ -5,27 +5,6 @@ use std::rc::Rc;
 
 use super::*;
 
-/// Represents a block of text that can be printed.
-struct Doc {}
-
-impl Doc {
-    fn pop_head(&mut self) -> String {
-        unimplemented!()
-    }
-
-    fn push_head(&mut self, _s: &str) {
-        unimplemented!()
-    }
-
-    fn pop_tail(&mut self) -> String {
-        unimplemented!()
-    }
-
-    fn push_tail(&mut self, _s: &str) {
-        unimplemented!()
-    }
-}
-
 fn arg_list(head: &str, tail: &str, sep: &str, args: impl Iterator<Item = String>) -> String {
     let args = args.collect::<Vec<_>>();
     let mut head = head.to_string();
@@ -244,7 +223,7 @@ impl<'ir> BasicPrinter<'ir> {
                 return format!("constant({})", i);
             }
             ConstKind::String(s) => {
-                return format!("constant(\"{}\")", s.get_str(self.ir).replace("\n", "\\n"));
+                return format!("constant(\"{:?}\")", s.get_str(self.ir)); // use debug to print escape characters
             }
             ConstKind::IArray(v) => {
                 let args = arg_list("[", "]", ", ", v.iter().map(|i| format!("{}", i)));
