@@ -2,7 +2,7 @@ interface Foo {
     fn say_hello(this)
 }
 
-class Bar for Foo(()) {
+class Bar for Foo({a: ()}) {
     fn say_hello(this) {
         print("Hello, world!\n");
     }
@@ -13,6 +13,6 @@ fn foo(a: Foo) {
 }
 
 fn main() {
-    let b = Bar();
+    let b = Bar({a: ()});
     foo(b);
 }

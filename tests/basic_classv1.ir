@@ -13,14 +13,12 @@ class @Qux(@B) {
 }
 fn @foo(%this: @B, %a: i32): Itf @Foo [parent=Bar] {
  %0: String = call @__rts_int_to_string(%a: i32)
- %1: String = constant("
-")
+ %1: String = constant("\n")
  %2: String = call @__rts_string_concat(%0: String, %1: String)
  %3: () = call @__rts_string_print(%2: String)
  %4: i32 = getattr[@a, idx=Some(0)](%this: @B)
  %5: String = call @__rts_int_to_string(%4: i32)
- %6: String = constant("
-")
+ %6: String = constant("\n")
  %7: String = call @__rts_string_concat(%5: String, %6: String)
  %8: () = call @__rts_string_print(%7: String)
  %9: i32 = getattr[@a, idx=Some(0)](%this: @B)
@@ -41,8 +39,7 @@ fn @baz(%this1: @B, %a1: Itf @Baz): Itf @Baz [parent=Qux] {
 }  
 fn @main(): () {
  %18: () = call @__rts_gc_init()
- %19: String = constant("hello world
-")
+ %19: String = constant("hello world\n")
  %20: () = call @__rts_string_print(%19: String)
  %b: i32 = constant(3)
  %b1: @B = struct_ctor(%b: i32)

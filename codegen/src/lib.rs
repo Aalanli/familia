@@ -374,6 +374,11 @@ fn codegen_const_op<'ctx, 'ir>(
                 .build_store(res, ptr.try_as_basic_value().left().unwrap())
                 .unwrap();
         }
+        ir::ConstKind::Void => {
+            // let const_val = code.context.i8_type().const_int(0 as u64, false);
+            let _var = code.get_var(ir, res);
+            // code.builder.build_store(var, const_val).unwrap();
+        }
         _ => unimplemented!("codegen for {:?}", c),
     }
 }

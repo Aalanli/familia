@@ -1,0 +1,32 @@
+interface @Foo {
+ fn @say_hello(this: This): () {...}
+}
+class @Bar({a: ()}) {
+ fn @say_hello(this: {a: ()}): () {...}
+}
+fn @say_hello(%this: {a: ()}): () [parent=Bar] {
+ %0: String = constant("Hello, world!\n")
+ %1: () = call @__rts_string_print(%0: String)
+}  
+fn @foo(%a: Itf @Foo): () {
+ %2: () = call @%a: Itf @Foosay_hello()
+}  
+fn @main(): () {
+ %3: () = call @__rts_gc_init()
+ %b: () = constant(())
+ %b1: {a: ()} = struct_ctor(%b: ())
+ %b2: Itf @Foo = cls_ctor @Bar(%b1: {a: ()})
+ %b3: Itf @Foo = let %b2: Itf @Foo
+ %4: () = call @foo(%b3: Itf @Foo)
+ %5: () = call @__rts_gc_destroy()
+}  
+fn @__rts_gc_init(): () { builtin! }
+fn @__rts_gc_destroy(): () { builtin! }
+fn @__rts_gc_alloc(@ptrNone, i32): @ptrNone { builtin! }
+fn @__rts_get_data(@ptrNone): @ptrNone { builtin! }
+fn @__rts_new_string(i32, @ptrNone): String { builtin! }
+fn @__rts_string_length(String): i32 { builtin! }
+fn @__rts_string_data(String): i32 { builtin! }
+fn @__rts_string_print(String): () { builtin! }
+fn @__rts_string_concat(String, String): String { builtin! }
+fn @__rts_int_to_string(i32): String { builtin! }

@@ -210,6 +210,7 @@ impl Query for VarTypeQuery {
                 struct_ty
             }
             ir::OPKind::Constant(c) => match c {
+                ir::ConstKind::Void => prim.void,
                 ir::ConstKind::I32(_) => prim.i32,
                 ir::ConstKind::String(_) => prim.string,
                 ir::ConstKind::IArray(_) => unimplemented!(),
@@ -391,9 +392,27 @@ fn rewrite_var_types<'s>(ir: &mut ir::IR, src: &'s ModSource) -> PhaseResult<()>
     Ok(())
 }
 
+fn basic_check(ir: &ir::IR, src: &ModSource) -> PhaseResult<()> {
+    for cls_id in ir.iter::<ir::ClassID>() {
+        let cls = ir.get(cls_id);
+        if let Some(repr) = cls.repr_type {
+            let repr_ty = ir.get(repr);
+            if !matches!(repr_ty.kind, ir::TypeKind::Struct { .. }) {
+                src.add_err(ProgramError {
+                    span: None,
+                    error_message: "Invalid representation type",
+                    ..Default::default()
+                });
+            }
+        }
+    }
+    src.commit_error(())
+}
+
 pub fn transform_ir<'s>(ir: &mut ir::IR) -> PhaseResult<()> {
     let module = ir.get_global::<ir::ModuleID>().unwrap();
     let src = ir.get(*module).src.clone().unwrap();
+    basic_check(ir, &src)?;
     subsititute_cls_repr_type(ir)?;
     rewrite_var_types(ir, &src)?;
     insert_rts_fns(ir);

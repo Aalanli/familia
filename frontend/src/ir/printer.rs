@@ -237,11 +237,14 @@ impl<'ir> BasicPrinter<'ir> {
 
     pub fn print_constkind(&self, c: &ConstKind) -> String {
         match c {
+            ConstKind::Void => {
+                return format!("constant(())");
+            }
             ConstKind::I32(i) => {
                 return format!("constant({})", i);
             }
             ConstKind::String(s) => {
-                return format!("constant(\"{}\")", s.get_str(self.ir));
+                return format!("constant(\"{}\")", s.get_str(self.ir).replace("\n", "\\n"));
             }
             ConstKind::IArray(v) => {
                 let args = arg_list("[", "]", ", ", v.iter().map(|i| format!("{}", i)));

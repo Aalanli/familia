@@ -423,6 +423,7 @@ impl OP {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ConstKind {
+    Void,
     I32(i32),
     String(SymbolID),
     IArray(Vec<i32>),

@@ -142,7 +142,7 @@ fn insert_builtins(state: &mut LowerModule<'_>) {
 
 #[derive(Debug)]
 struct PathAnalysis<'a> {
-    name: &'a ast::Ident,
+    _name: &'a ast::Ident,
     decl: &'a ast::Decl,
     sub_decls: HashMap<&'a str, PathAnalysis<'a>>,
 }
@@ -161,7 +161,7 @@ fn path_analysis_helper<'s, 'a>(src: &'s ModSource, ast: &'a Decl) -> PathAnalys
         sub_decls.insert(name.get_str(), path_analysis_helper(src, decl));
     }
     PathAnalysis {
-        name: ast.name(),
+        _name: ast.name(),
         decl: ast,
         sub_decls,
     }
@@ -421,6 +421,14 @@ fn construct_types_helper<'a>(
                         let id = construct_types_helper(src, path_map, ir, temp, decl)?;
                         Some(id)
                     }
+                    ast::DeclKind::InterfaceImpl { .. } => {
+                        let decl = path_map.get(path).unwrap();
+                        let itf_id = *temp
+                            .itf_impl_to_id
+                            .or_insert_with(decl, || ir.temporary_id());
+                        let tid = ir::TypeID::itf(ir, itf_id);
+                        Some(tid)
+                    }
                     _ => {
                         src.add_err(ProgramError {
                             error_message: "expected a type declaration",
@@ -641,6 +649,18 @@ fn visit_expr(
             let var_id = var_map.get(&sym).unwrap();
             return *var_id;
         }
+        ast::ExprKind::VoidLit => {
+            let var = ir::VarID::new_var(&state.ir, parent_name, Some(ir::TypeID::void(&state.ir)), Some(expr.span));
+            let op = state.ir.insert(
+                ir::OP {
+                    kind: ir::OPKind::Constant(ir::ConstKind::Void),
+                    span: expr.span,
+                    res: Some(var),
+                }
+            );
+            ops.push(op);
+            return var;
+        }
         ast::ExprKind::IntLit(i) => {
             let id = state.ir.temporary_id();
             let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
@@ -723,15 +743,16 @@ fn visit_expr(
                         *state
                             .temp
                             .fn_impl_to_id
-                            .or_insert_with(decl, || state.ir.temporary_id())
+                            .or_insert_with(decl, 
+                                || state.ir.temporary_id())
                     })
                     .unwrap_or_else(|| {
                         assert!(is_builtin_fn(path));
                         get_builtin_fn(path, &state.ir)
                     });
-                let func_ret = state.ir.get(func_id).decl.ret_ty;
+                // let func_ret = state.ir.get(func_id).decl.ret_ty;
                 let var =
-                    ir::VarID::new_var(&state.ir, parent_name, Some(func_ret), Some(expr.span));
+                    ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
                 let id = state.ir.temporary_id();
                 state.ir.insert_with(
                     id,
@@ -903,8 +924,8 @@ fn visit_class_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Opt
         repr_ty,
     } = &decl.kind
     {
-        let repr_type = if let Some(repr) = repr_ty {
-            Some(path_to_type(state, repr)?)
+        let repr_type = if let Some(ty) = repr_ty {
+            Some(construct_types(state, ty)?)
         } else {
             None
         };
@@ -1015,6 +1036,24 @@ fn visit_interface_impl<'a>(
 mod ast_to_ir_test {
     use super::*;
     use crate::parse;
+
+    fn run_suite(src: &str) {
+        let src = src.into();
+        let ast = parse(&src);
+        if let Err(e) = ast {
+            println!("{}", e);
+        } else {
+            let ast = ast.unwrap();
+
+            let _ir = ast_to_ir(src, ast);
+            if let Err(e) = _ir {
+                println!("{}", e);
+            } else {
+                println!("{}", ir::print_basic(&_ir.unwrap()));
+            }
+        }
+    }
+
 
     #[test]
     fn test_check_path() {
@@ -1157,5 +1196,31 @@ mod ast_to_ir_test {
                 println!("{}", ir::print_basic(&_ir.unwrap()));
             }
         }
+    }
+
+    #[test]
+    fn test_void() {
+        let src = "\
+        interface Foo {
+            fn say_hello(this)
+        }
+
+        class Bar for Foo({a: ()}) {
+            fn say_hello(this) {
+                print(\"Hello, world!\\n\");
+            }
+        }
+
+        fn foo(a: Foo) {
+            a.say_hello();
+        }
+        
+        fn main() {
+            let b = Bar({a: ()});
+            foo(b);
+        }
+        ";
+
+        run_suite(src);
     }
 }

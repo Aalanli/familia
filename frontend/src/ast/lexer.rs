@@ -95,7 +95,7 @@ pub enum Tok {
     Dot,
     LParen,
     RParen,
-    DoubleParen, // ()
+    // DoubleParen, // ()
     LBrace,
     RBrace,
     Colon,
@@ -343,10 +343,10 @@ impl<T: Iterator<Item = char>> Lexer<T> {
                 let rpos = self.get_loc();
                 return Some(Ok((lpos, Tok::RBrace, rpos)));
             } else if self.match_and_eat("(") {
-                if self.match_and_eat(")") {
-                    let rpos = self.get_loc();
-                    return Some(Ok((lpos, Tok::DoubleParen, rpos)));
-                }
+                // if self.match_and_eat(")") {
+                //     let rpos = self.get_loc();
+                //     return Some(Ok((lpos, Tok::DoubleParen, rpos)));
+                // }
                 let rpos = self.get_loc();
                 return Some(Ok((lpos, Tok::LParen, rpos)));
             } else if self.match_and_eat(")") {
@@ -573,6 +573,16 @@ mod test_lex {
         let lexer = Lexer::new(input.chars());
         for i in lexer {
             // println!("{:?}", i);
+            i.unwrap();
+        }
+    }
+
+    #[test]
+    fn test_lex_void() {
+        let input = "(())";
+        let lexer = Lexer::new(input.chars());
+        for i in lexer {
+            println!("{:?}", i);
             i.unwrap();
         }
     }

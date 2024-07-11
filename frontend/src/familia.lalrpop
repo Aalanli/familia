@@ -40,7 +40,7 @@ DeclKind : DeclKind = {
         };
         kind
     },
-    "class" <name:Ident> <for_it:("for" <Path>)?> <repr_ty:("(" <Path> ")")?> "{" <sub_decls:Decl*> "}" => {
+    "class" <name:Ident> <for_it:("for" <Path>)?> <repr_ty:("(" <Type> ")")?> "{" <sub_decls:Decl*> "}" => {
         DeclKind::ClassImpl { name, sub_decls, for_it, repr_ty }
     },
     "interface" <name:Ident> "{" <sub_decls:Decl*> "}" => {
@@ -89,6 +89,7 @@ pub Expr : Expr = {
 }
 
 ExprKind: ExprKind = {
+    "(" ")" => ExprKind::VoidLit,
     <n:Int> => ExprKind::IntLit(n),
     <s:String> => ExprKind::StringLit(s),
     <v:Var> => ExprKind::Var(v),
@@ -107,7 +108,7 @@ pub Type : Type = {
 }
 
 TypeKind: TypeKind = {
-    "()" => TypeKind::Void,
+    "(" ")" => TypeKind::Void,
     "{" <fields:Comma<TypeVar>> "}" => {
         TypeKind::Struct { fields }
     },
@@ -164,7 +165,7 @@ extern {
         "." => Tok::Dot,
         "(" => Tok::LParen,
         ")" => Tok::RParen,
-        "()" => Tok::DoubleParen,
+        // "()" => Tok::DoubleParen,
         "{" => Tok::LBrace,
         "}" => Tok::RBrace,
         ":" => Tok::Colon,

@@ -47,6 +47,10 @@ impl TypeKind {
             TypeKind::Symbol(path) => vec![path],
         }
     }
+
+    pub fn is_struct(&self) -> bool {
+        matches!(self, TypeKind::Struct { .. })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -75,7 +79,7 @@ pub enum DeclKind {
     ClassImpl {
         name: Ident,
         for_it: Option<Path>,
-        repr_ty: Option<Path>,
+        repr_ty: Option<Type>,
         sub_decls: Vec<Decl>,
     },
     InterfaceImpl {
@@ -165,6 +169,7 @@ pub struct Expr {
 #[derive(Clone, Debug)]
 pub enum ExprKind {
     Var(Var),
+    VoidLit,
     IntLit(i32),
     StringLit(String),
     MethodCall {
@@ -270,7 +275,7 @@ pub fn default_visit_decl<'a>(decl: &'a Decl, visitor: &mut impl Visitor<'a>) {
                 visitor.visit_path(for_it);
             }
             if let Some(repr_ty) = repr_ty {
-                visitor.visit_path(repr_ty);
+                visitor.visit_type(repr_ty);
             }
         }
         DeclKind::InterfaceImpl {
@@ -317,6 +322,7 @@ pub fn default_visit_expr<'a>(expr: &'a Expr, visitor: &mut impl Visitor<'a>) {
         ExprKind::Var(var) => {
             visitor.visit_var(var);
         }
+        ExprKind::VoidLit => {}
         ExprKind::IntLit(_) => {}
         ExprKind::StringLit(_) => {}
         ExprKind::GetAttr { exp, .. } => {
