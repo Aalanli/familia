@@ -4,6 +4,7 @@ use crate::ast::{
     Stmt, StmtKind, 
     Decl, DeclKind, 
     Type, TypeKind, 
+    TypeBound, GenericType, TypeArg,
     Var, 
     P, 
     Path
@@ -32,9 +33,9 @@ DeclKind : DeclKind = {
     },
     <decl:FnDecl> => decl,
     <decl:FnDecl> <body:StmtBody> => {
-        let DeclKind::FnDecl { name, args, ty } = decl else { unreachable!() };
+        let DeclKind::FnDecl { name, generic_args, bounds, args, ty } = decl else { unreachable!() };
         let kind = DeclKind::FnImpl {
-            name, args, ty, body
+            name, generic_args, bounds, args, ty, body
         };
         kind
     },
@@ -47,14 +48,50 @@ DeclKind : DeclKind = {
 }
 
 FnDecl : DeclKind = {
-    "fn" <name:Ident> "(" <args:ArgList> ")" <tlloc:@L> <ret:(":" <Type>)?> <rloc:@L> => {
+    "fn" <name:Ident> <generic_args:MaybeGenericList> "(" <args:ArgList> ")" <tlloc:@L> <ret:(":" <Type>)?> <bounds:MaybeWhereBound> <rloc:@L> => {
         let temp_void = Type { kind: TypeKind::Void, span: tlloc.span(rloc) };
         let kind = DeclKind::FnDecl {
-            name, args, ty:ret.map_or(temp_void, |x| x)
+            name, generic_args, bounds, args, ty:ret.map_or(temp_void, |x| x)
         };
         kind
     }
 }
+
+MaybeGenericList : Vec<GenericType> = {
+    <lst:GenericList?> => {
+        lst.unwrap_or(vec![])
+    }
+}
+
+GenericList : Vec<GenericType> = {
+    "[" <lst:CommaNonEmpty<Ident>> "]" => lst.into_iter().map(|x| GenericType { name: x }).collect(),
+}
+
+MaybeWhereBound: Vec<TypeBound> = {
+    <lst:("where" <CommaNonEmpty<TypeBound>>)?> => {
+        lst.unwrap_or(vec![])
+    }
+}
+
+TypeBound : TypeBound = {
+    <lloc:@L> "class" <cls:Ident> "for" <itf:Path> "(" <type_:Ident> ")" <rloc:@L> => {
+        TypeBound {
+            cls: Some(cls),
+            itf,
+            type_,
+            span: lloc.span(rloc)
+        }
+    },
+    <lloc:@L> <itf:Path> "(" <type_:Ident> ")" <rloc:@L> => {
+        TypeBound {
+            cls: None,
+            itf,
+            type_,
+            span: lloc.span(rloc)
+        }
+    },
+}
+
 
 ArgList : Vec<Var> = {
     <v: Comma<TypeVar>> => v,
@@ -91,12 +128,29 @@ ExprKind: ExprKind = {
     <n:Int> => ExprKind::IntLit(n),
     <s:String> => ExprKind::StringLit(s),
     <v:Var> => ExprKind::Var(v),
-    <e:Expr> "." <a:Ident> "(" <args:Comma<Expr>> ")"  => ExprKind::MethodCall { exp: P(e), sym: a, args },
+    <m:MethodCall> => m,
     <e:Expr> "." <a:Ident> => ExprKind::GetAttr { exp: P(e), sym: a },
     "(" <l:Expr> "+" <r:Expr> ")" => ExprKind::Add { lhs:P(l), rhs:P(r) },
-    <c:Path> "(" <args:Comma<Expr>> ")" => ExprKind::Call { path:c, args },
+    <path:Path> <generic_args:MaybeTypeArgs> "(" <args:Comma<Expr>> ")" => ExprKind::Call { path, generic_args, args },
     "{" <args:Comma<(<Ident> ":" <Expr>)>> "}" => ExprKind::Struct { args },
     "(" <e:ExprKind> ")" => e
+}
+
+MethodCall : ExprKind = {
+    <e:Expr> "." <sym:SinglePath> "(" <args:Comma<Expr>> ")"  => ExprKind::MethodCall { exp: P(e), general_form: false, sym, args },
+    <e:Expr> "." "(" <sym:Path> ")" "(" <args:Comma<Expr>> ")" => ExprKind::MethodCall { exp: P(e), general_form: true, sym, args },
+}
+
+MaybeTypeArgs : Vec<TypeArg> = {
+    <args:("[" <CommaNonEmpty<TypeArg>> "]")?> => {
+        args.unwrap_or(vec![])
+    }
+}
+
+TypeArg : TypeArg = {
+    <lloc:@L> <type_:Path> <with:("with" <Path>)?> <rloc:@L> => {
+        TypeArg { type_, with, span: lloc.span(rloc) }
+    }
 }
 
 pub Type : Type = {
@@ -110,13 +164,29 @@ TypeKind: TypeKind = {
     "{" <fields:Comma<TypeVar>> "}" => {
         TypeKind::Struct { fields }
     },
-    <s:Path> => TypeKind::Symbol(s)
+    <s:Path> => TypeKind::Path(s),
 }
+
+GenericType: Type = {
+    <lloc:@L> <name:Ident> <rloc:@L> => {
+        Type { 
+            kind: TypeKind::Symbol(GenericType { name }), 
+            span: lloc.span(rloc)
+        }
+    },
+}
+
 
 pub Path: Path = {
     <lloc:@L> <mut v:(<Ident> "::")*> <e:Ident> <rloc:@L> => {
         v.push(e);
         Path { path: v, span: lloc.span(rloc) }
+    }
+}
+
+pub SinglePath: Path = {
+    <lloc:@L> <v:Ident> <rloc:@L> => {
+        Path { path: vec![v], span: lloc.span(rloc) }
     }
 }
 
@@ -144,6 +214,13 @@ Comma<T>: Vec<T> = {
     }
 };
 
+CommaNonEmpty<T>: Vec<T> = {
+    <e:T> <mut v:("," <T>)*> => {
+        v.insert(0, e);
+        v
+    }
+}
+
 
 extern {
     type Location = Loc;
@@ -155,6 +232,8 @@ extern {
         "type" => Tok::Type,
         "fn" => Tok::Fn,
         "for" => Tok::For,
+        "where" => Tok::Where,
+        "with" => Tok::With,
         "let" => Tok::Let,
         "return" => Tok::Return,
         "this" => Tok::This,
@@ -163,6 +242,8 @@ extern {
         "." => Tok::Dot,
         "(" => Tok::LParen,
         ")" => Tok::RParen,
+        "[" => Tok::LBracket,
+        "]" => Tok::RBracket,
         // "()" => Tok::DoubleParen,
         "{" => Tok::LBrace,
         "}" => Tok::RBrace,

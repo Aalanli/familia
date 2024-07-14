@@ -87,6 +87,8 @@ pub enum Tok {
     Type,
     Fn,
     For,
+    Where,
+    With,
     Let,
     Return,
     This, // this
@@ -95,6 +97,8 @@ pub enum Tok {
     Dot,
     LParen,
     RParen,
+    LBracket, // [
+    RBracket, // ]
     // DoubleParen, // ()
     LBrace,
     RBrace,
@@ -352,6 +356,12 @@ impl<T: Iterator<Item = char>> Lexer<T> {
             } else if self.match_and_eat(")") {
                 let rpos = self.get_loc();
                 return Some(Ok((lpos, Tok::RParen, rpos)));
+            } else if self.match_and_eat("[") {
+                let rpos = self.get_loc();
+                return Some(Ok((lpos, Tok::LBracket, rpos)));
+            } else if self.match_and_eat("]") {
+                let rpos = self.get_loc();
+                return Some(Ok((lpos, Tok::RBracket, rpos)));
             } else if self.match_and_eat(":") {
                 if self.peek_char() == Some(':') {
                     self.fill_buf_by(1);
@@ -409,6 +419,12 @@ impl<T: Iterator<Item = char>> Lexer<T> {
             } else if self.match_and_eat("for") {
                 let rpos = self.get_loc();
                 return Some(Ok((lpos, Tok::For, rpos)));
+            } else if self.match_and_eat("where") {
+                let rpos = self.get_loc();
+                return Some(Ok((lpos, Tok::Where, rpos)));
+            } else if self.match_and_eat("with") {
+                let rpos = self.get_loc();
+                return Some(Ok((lpos, Tok::With, rpos)));
             } else if self.buf.iter().all(|x| x.is_numeric()) {
                 // todo: should change to regex
                 let span = lpos.span(self.get_loc());

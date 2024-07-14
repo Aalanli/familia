@@ -28,7 +28,28 @@ pub enum TypeKind {
     This,
     Self_,
     Struct { fields: Vec<Var> },
-    Symbol(Path),
+    Path(Path),
+    Symbol(GenericType),
+}
+
+#[derive(Clone, Debug)]
+pub struct TypeBound {
+    pub cls: Option<Ident>,
+    pub itf: Path,
+    pub type_: Ident,
+    pub span: Span
+}
+
+#[derive(Clone, Debug)]
+pub struct GenericType {
+    pub name: Ident,
+}
+
+#[derive(Clone, Debug)]
+pub struct TypeArg {
+    pub type_: Path, 
+    pub with: Option<Path>,
+    pub span: Span
 }
 
 impl TypeKind {
@@ -44,7 +65,8 @@ impl TypeKind {
                 .map(|f| f.ty.as_ref().unwrap().kind.ref_paths())
                 .flatten()
                 .collect(),
-            TypeKind::Symbol(path) => vec![path],
+            TypeKind::Path(path) => vec![path],
+            TypeKind::Symbol(_) => vec![],
         }
     }
 
@@ -67,11 +89,15 @@ pub enum DeclKind {
     },
     FnDecl {
         name: Ident,
+        generic_args: Vec<GenericType>,
+        bounds: Vec<TypeBound>,
         args: Vec<Var>,
         ty: Type,
     },
     FnImpl {
         name: Ident,
+        generic_args: Vec<GenericType>,
+        bounds: Vec<TypeBound>,
         args: Vec<Var>,
         ty: Type,
         body: Vec<Stmt>,
@@ -174,7 +200,8 @@ pub enum ExprKind {
     StringLit(String),
     MethodCall {
         exp: P<Expr>,
-        sym: Ident,
+        sym: Path,
+        general_form: bool, // x.hello() vs x.(c::hello)()
         args: Vec<Expr>,
     },
     GetAttr {
@@ -187,6 +214,7 @@ pub enum ExprKind {
     },
     Call {
         path: Path,
+        generic_args: Vec<TypeArg>,
         args: Vec<Expr>,
     },
     Struct {
@@ -305,9 +333,10 @@ pub fn default_visit_type<'a>(ty: &'a Type, visitor: &mut impl Visitor<'a>) {
                 visitor.visit_var(field);
             }
         }
-        TypeKind::Symbol(path) => {
+        TypeKind::Path(path) => {
             visitor.visit_path(path);
         }
+        TypeKind::Symbol(_) => {}
     }
 }
 
@@ -325,24 +354,25 @@ pub fn default_visit_expr<'a>(expr: &'a Expr, visitor: &mut impl Visitor<'a>) {
         ExprKind::VoidLit => {}
         ExprKind::IntLit(_) => {}
         ExprKind::StringLit(_) => {}
-        ExprKind::GetAttr { exp, .. } => {
+        ExprKind::GetAttr { exp,  sym: _ } => {
             visitor.visit_expr(exp);
         }
         ExprKind::Add { lhs, rhs } => {
             visitor.visit_expr(lhs);
             visitor.visit_expr(rhs);
         }
-        ExprKind::Call { args, path } => {
+        ExprKind::Call { args, path, generic_args: _ } => {
             for arg in args {
                 visitor.visit_expr(arg);
             }
             visitor.visit_path(path);
         }
-        ExprKind::MethodCall { exp, args, .. } => {
+        ExprKind::MethodCall { exp, args, sym, general_form: _ } => {
             visitor.visit_expr(exp);
             for arg in args {
                 visitor.visit_expr(arg);
             }
+            visitor.visit_path(sym);
         }
         ExprKind::Struct { args } => {
             for (_, arg) in args {
