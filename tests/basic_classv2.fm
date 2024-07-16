@@ -8,13 +8,6 @@ class Bar for Foo({a: ()}) {
     }
 }
 
-class Baz for Foo({a: ()}) {
-    fn say_hello(this) {
-        print("Hello again.\n");
-    }
-}
-
-
 fn foo(a: Foo) {
     a.say_hello();
 }
@@ -22,6 +15,4 @@ fn foo(a: Foo) {
 fn main() {
     let b = Bar({a: ()});
     foo(b);
-    let c = Baz({a: ()});
-    foo(c);
 }
