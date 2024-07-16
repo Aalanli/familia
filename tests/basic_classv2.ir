@@ -4,33 +4,21 @@ interface @Foo {
 class @Bar({a: ()}) {
  fn @say_hello(this: {a: ()}): () {...}
 }
-class @Baz({a: ()}) {
- fn @say_hello(this: {a: ()}): () {...}
-}
 fn @say_hello(%this: {a: ()}): () [parent=Bar] {
- %0: String = constant(""Hello, world!\n"")
+ %0: String = constant("Hello, world!\n")
  %1: () = call @__rts_string_print(%0: String)
 }  
-fn @say_hello1(%this1: {a: ()}): () [parent=Baz] {
- %2: String = constant(""Hello again.\n"")
- %3: () = call @__rts_string_print(%2: String)
-}  
 fn @foo(%a: Itf @Foo): () {
- %4: () = call @%a: Itf @Foosay_hello()
+ %2: () = call @%a: Itf @Foosay_hello()
 }  
 fn @main(): () {
- %5: () = call @__rts_gc_init()
+ %3: () = call @__rts_gc_init()
  %b: () = constant(())
  %b1: {a: ()} = struct_ctor(%b: ())
  %b2: Itf @Foo = cls_ctor @Bar(%b1: {a: ()})
  %b3: Itf @Foo = let %b2: Itf @Foo
- %6: () = call @foo(%b3: Itf @Foo)
- %c: () = constant(())
- %c1: {a: ()} = struct_ctor(%c: ())
- %c2: Itf @Foo = cls_ctor @Baz(%c1: {a: ()})
- %c3: Itf @Foo = let %c2: Itf @Foo
- %7: () = call @foo(%c3: Itf @Foo)
- %8: () = call @__rts_gc_destroy()
+ %4: () = call @foo(%b3: Itf @Foo)
+ %5: () = call @__rts_gc_destroy()
 }  
 fn @__rts_gc_init(): () { builtin! }
 fn @__rts_gc_destroy(): () { builtin! }
