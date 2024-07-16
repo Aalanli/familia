@@ -29,7 +29,7 @@ pub enum TypeKind {
     Self_,
     Struct { fields: Vec<Var> },
     Path(Path),
-    Symbol(GenericType),
+    Generic(GenericType),
 }
 
 #[derive(Clone, Debug)]
@@ -66,7 +66,7 @@ impl TypeKind {
                 .flatten()
                 .collect(),
             TypeKind::Path(path) => vec![path],
-            TypeKind::Symbol(_) => vec![],
+            TypeKind::Generic(_) => vec![],
         }
     }
 
@@ -336,7 +336,7 @@ pub fn default_visit_type<'a>(ty: &'a Type, visitor: &mut impl Visitor<'a>) {
         TypeKind::Path(path) => {
             visitor.visit_path(path);
         }
-        TypeKind::Symbol(_) => {}
+        TypeKind::Generic(_) => {}
     }
 }
 

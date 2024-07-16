@@ -281,6 +281,12 @@ impl TypeID {
     pub fn itf(ir: &IR, itf: InterfaceID) -> TypeID {
         TypeID::insert(ir, TypeKind::Itf(itf))
     }
+
+    pub fn generic(ir: &IR, name: &str, bounds: Vec<TypeBound>, span: Span) -> TypeID {
+        let name = SymbolID::insert(ir, name);
+        let generic = ir.insert(GenericType { name, bounds, span });
+        TypeID::insert(ir, TypeKind::Generic(generic))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -309,6 +315,9 @@ pub struct TypeDecl {
     pub span: Span,
 }
 
+/// I32, Void, String, Fn have value semantics
+/// Struct has reference semantics
+/// This and Self_ are placeholder types
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TypeKind {
     I32,
@@ -320,12 +329,37 @@ pub enum TypeKind {
     Ptr(Option<TypeID>),
     Fn(Vec<TypeID>, TypeID),
     Itf(InterfaceID),
+    Generic(GenericTypeID)
 }
 
 impl Default for TypeKind {
     fn default() -> Self {
         TypeKind::Void
     }
+}
+
+impl_id!(GenericTypeID, GenericType, false);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct GenericType {
+    pub name: SymbolID,
+    pub bounds: Vec<TypeBound>,
+    pub span: Span
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TypeBound {
+    pub itf: InterfaceID,
+    pub cls_var: Option<ClassVarID>,
+    pub span: Span,
+}
+
+impl_id!(ClassVarID, ClassVar, false);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ClassVar {
+    pub name: SymbolID,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

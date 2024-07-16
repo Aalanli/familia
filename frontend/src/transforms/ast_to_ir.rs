@@ -6,6 +6,7 @@ use super::utils::PointerHashMap;
 use super::PrimitiveRegistry;
 use crate::ast;
 use crate::ir;
+use crate::ir::Attribute;
 use crate::prelude::*;
 
 use ast::Decl;
@@ -118,7 +119,8 @@ fn insert_builtins(state: &mut LowerModule<'_>) {
 
     let mut fns = HashMap::new();
     for decl in BUILTIN_INC.iter() {
-        if let ast::DeclKind::FnDecl { name, args, ty } = &decl.kind {
+        if let ast::DeclKind::FnDecl { name, args, ty, generic_args, bounds } = &decl.kind {
+            assert!(generic_args.len() == 0 && bounds.len() == 0);
             let fn_decl = get_fn_decl(state, Span::default(), name, args, ty).unwrap();
             let id = state.ir.insert(ir::FuncImpl {
                 decl: fn_decl,
@@ -333,6 +335,7 @@ struct Temporaries<'a> {
     class_impl_to_id: PointerHashMap<'a, ast::Decl, ir::ClassID>,
     itf_impl_to_id: PointerHashMap<'a, ast::Decl, ir::InterfaceID>,
     path_ty_cache: HashMap<UniquePathHashKey<'a>, ir::TypeID>,
+    current_generics: HashMap<&'a str, ir::TypeID>
 }
 
 impl<'a> Temporaries<'a> {
@@ -343,6 +346,7 @@ impl<'a> Temporaries<'a> {
             class_impl_to_id: PointerHashMap::new(),
             itf_impl_to_id: PointerHashMap::new(),
             path_ty_cache: HashMap::new(),
+            current_generics: HashMap::new(),
         }
     }
 }
@@ -379,6 +383,106 @@ struct LowerModule<'a> {
     temp: Temporaries<'a>,
 }
 
+impl<'a> LowerModule<'a> {
+    fn get_interface(&mut self, path: &'a ast::Path, add_err: bool) -> Option<ir::InterfaceID> {
+        let path = self.path_map.get(path).or_else(|| {
+            if add_err {
+                self.src.add_err(ProgramError {
+                    error_message: "Unbound Interface",
+                    span: Some(path.span),
+                    ..Default::default()
+                });
+            }
+            None
+        })?;
+        let id = *self.temp.itf_impl_to_id.or_insert_with(path, || {
+            self.ir.temporary_id()
+        });
+        Some(id)
+    }
+
+    fn get_function(&mut self, path: &'a ast::Path, add_err: bool) -> Option<ir::FuncID> {
+        let path = self.path_map.get(path).or_else(|| {
+            if add_err {
+                self.src.add_err(ProgramError {
+                    error_message: "Unbound Function",
+                    span: Some(path.span),
+                    ..Default::default()
+                });
+            }
+            None
+        })?;
+        let id = *self.temp.fn_impl_to_id.or_insert_with(path, || {
+            self.ir.temporary_id()
+        });
+        Some(id)
+    }
+
+    fn get_class(&mut self, path: &'a ast::Path, add_err: bool) -> Option<ir::ClassID> {
+        let path = self.path_map.get(path).or_else(|| {
+            if add_err {
+                self.src.add_err(ProgramError {
+                    error_message: "Unbound Class",
+                    span: Some(path.span),
+                    ..Default::default()
+                });
+            }
+            None
+        })?;
+        let id = *self.temp.class_impl_to_id.or_insert_with(path, || {
+            self.ir.temporary_id()
+        });
+        Some(id)
+    }
+}
+
+
+fn construct_type_path_helper<'a>(
+    src: &ModSource,
+    path_map: &PathToDeclAnalysis<'a>,
+    ir: &ir::IR,
+    temp: &mut Temporaries<'a>,
+    path: &'a ast::Path,
+) -> Option<ir::TypeID> {
+    if let Some(ty) = temp.path_ty_cache.get(&UniquePathHashKey(path)) {
+        return Some(*ty);
+    }
+    let ty = if is_builtin_type(path) {
+        let ty = get_builtin_type(path);
+        if let Err(e) = ty {
+            src.add_err(e);
+            return None;
+        }
+        Some(ir::TypeID::insert(&ir, ty.unwrap()))
+    } else {
+        let decl = path_map.get(path).unwrap();
+        match &decl.kind {
+            ast::DeclKind::TypeDecl { decl, .. } => {
+                let id = construct_types_helper(src, path_map, ir, temp, decl)?;
+                Some(id)
+            }
+            ast::DeclKind::InterfaceImpl { .. } => {
+                let decl = path_map.get(path).unwrap();
+                let itf_id = *temp
+                    .itf_impl_to_id
+                    .or_insert_with(decl, || ir.temporary_id());
+                let tid = ir::TypeID::itf(ir, itf_id);
+                Some(tid)
+            }
+            _ => {
+                src.add_err(ProgramError {
+                    error_message: "expected a type declaration",
+                    span: Some(path.span),
+                    ..Default::default()
+                });
+                None
+            }
+        }
+    }?;
+    temp.path_ty_cache.insert(UniquePathHashKey(path), ty);
+    Some(ty)
+}
+
 fn construct_types_helper<'a>(
     src: &ModSource,
     path_map: &PathToDeclAnalysis<'a>,
@@ -403,44 +507,16 @@ fn construct_types_helper<'a>(
             let id = ir::TypeID::insert(&ir, ir::TypeKind::Struct { fields: field_ids });
             Some(id)
         }
-        ast::TypeKind::Symbol(path) => {
-            if let Some(ty) = temp.path_ty_cache.get(&UniquePathHashKey(path)) {
-                return Some(*ty);
-            }
-            let ty = if is_builtin_type(path) {
-                let ty = get_builtin_type(path);
-                if let Err(e) = ty {
-                    src.add_err(e);
-                    return None;
-                }
-                Some(ir::TypeID::insert(&ir, ty.unwrap()))
-            } else {
-                let decl = path_map.get(path).unwrap();
-                match &decl.kind {
-                    ast::DeclKind::TypeDecl { decl, .. } => {
-                        let id = construct_types_helper(src, path_map, ir, temp, decl)?;
-                        Some(id)
-                    }
-                    ast::DeclKind::InterfaceImpl { .. } => {
-                        let decl = path_map.get(path).unwrap();
-                        let itf_id = *temp
-                            .itf_impl_to_id
-                            .or_insert_with(decl, || ir.temporary_id());
-                        let tid = ir::TypeID::itf(ir, itf_id);
-                        Some(tid)
-                    }
-                    _ => {
-                        src.add_err(ProgramError {
-                            error_message: "expected a type declaration",
-                            span: Some(path.span),
-                            ..Default::default()
-                        });
-                        None
-                    }
-                }
-            }?;
-            temp.path_ty_cache.insert(UniquePathHashKey(path), ty);
-            Some(ty)
+        ast::TypeKind::Path(path) => construct_type_path_helper(src, path_map, ir, temp, path),
+        ast::TypeKind::Generic(g) => {
+            temp.current_generics.get(g.name.get_str()).or_else(|| {
+                src.add_err(ProgramError {
+                    error_message: "unbound generic",
+                    span: Some(ty_decl.span),
+                    ..Default::default()
+                });
+                None
+            }).cloned()
         }
     }
 }
@@ -592,24 +668,86 @@ fn visit_var<'a>(state: &mut LowerModule<'a>, var: &'a ast::Var) -> Option<ir::V
     Some(id)
 }
 
+fn process_fn_generics<'a>(state: &mut LowerModule<'a>, generic_args: &[ast::GenericType], bounds: &[ast::TypeBound]) -> Option<()> {
+    // clear old function generic params
+    // TODO: handle nested generics
+    state.temp.current_generics.clear();
+    let mut gids = HashMap::new();
+    // check no duplicates
+    for garg in generic_args.iter() {
+        let gname = garg.name.get_str();
+        if state.temp.current_generics.contains_key(gname) {
+            state.src.add_err(ProgramError {
+                error_message: "duplicate generic",
+                span: Some(garg.name.span),
+                ..Default::default()
+            });
+            return None;
+        }
+        let gid = state.ir.temporary_id();
+        state.temp.current_generics.insert(gname, gid);
+        gids.insert(gid, ir::GenericType {
+            name: ir::SymbolID::insert(&state.ir, gname),
+            bounds: vec![],
+            span: garg.name.span
+        });            
+    }
+
+    // add bounds
+    for bound in bounds.iter() {
+        let itf_ty = state.get_interface(&bound.itf, true)?;
+        let gid = *state.temp.current_generics.get(bound.type_.get_str()).or_else(|| {
+            state.src.add_err(ProgramError {
+                error_message: "Invalid Type Bound",
+                span: Some(bound.type_.span),
+                ..Default::default()
+            });
+            None
+        })?;
+        let bounds = &mut gids.get_mut(&gid).unwrap().bounds;
+        let cls_var = bound.cls.map(|x| {
+            state.ir.insert(ir::ClassVar { name: ir::SymbolID::insert(&state.ir, x.name()), span: x.span })
+        });
+
+        bounds.push(ir::TypeBound {
+            itf: itf_ty,
+            cls_var, span: bound.span
+        });
+    }
+
+    // insert into ir
+    for (gid, generic) in gids.into_iter() {
+        let generic = state.ir.insert(generic);
+        state.ir.insert_with(gid, ir::Type { kind: ir::TypeKind::Generic(generic) });
+    }
+
+    Some(())
+}
+
 fn visit_fn_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Option<ir::FuncID> {
     if let ast::DeclKind::FnImpl {
         name,
+        generic_args,
+        bounds,
         args: fargs,
         ty,
         body,
     } = &decl.kind
     {
+        // add generic parameters into state
+        if process_fn_generics(state, generic_args, bounds).is_none() {
+            return None;
+        }
+
         let fdecl = get_fn_decl(state, decl.span, name, fargs, ty)?;
-        let args: Option<Vec<_>> = fargs.iter().map(|arg| visit_var(state, arg)).collect();
-        let args = args?;
+        let args = fargs.iter().map(|arg| visit_var(state, arg)).collect::<Option<Vec<_>>>()?;
         let mut var_map = HashMap::new();
         for (fvar, var) in fargs.iter().zip(args.iter()) {
             var_map.insert(ir::SymbolID::insert(&state.ir, fvar.name.get_str()), *var);
         }
         let mut ops = Vec::new();
         for stmt in body.iter() {
-            insert_stmts(state, &mut var_map, &mut ops, stmt);
+            insert_stmts(state, &mut var_map, &mut ops, stmt)?;
         }
         let func = ir::FuncImpl {
             decl: fdecl,
@@ -642,12 +780,12 @@ fn visit_expr(
     ops: &mut Vec<ir::OPID>,
     expr: &ast::Expr,
     parent_name: Option<ir::SymbolID>,
-) -> ir::VarID {
+) -> Option<ir::VarID> {
     match &expr.kind {
         ast::ExprKind::Var(v) => {
             let sym = ir::SymbolID::insert(&state.ir, v.name.get_str());
             let var_id = var_map.get(&sym).unwrap();
-            return *var_id;
+            return Some(*var_id);
         }
         ast::ExprKind::VoidLit => {
             let var = ir::VarID::new_var(
@@ -662,13 +800,11 @@ fn visit_expr(
                 res: Some(var),
             });
             ops.push(op);
-            return var;
+            return Some(var);
         }
         ast::ExprKind::IntLit(i) => {
-            let id = state.ir.temporary_id();
             let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
-            state.ir.insert_with(
-                id,
+            let id = state.ir.insert(
                 ir::OP {
                     kind: ir::OPKind::Constant(ir::ConstKind::I32(*i)),
                     span: expr.span,
@@ -676,13 +812,11 @@ fn visit_expr(
                 },
             );
             ops.push(id);
-            return var;
+            return Some(var);
         }
         ast::ExprKind::StringLit(s) => {
-            let id = state.ir.temporary_id();
             let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
-            state.ir.insert_with(
-                id,
+            let id = state.ir.insert(
                 ir::OP {
                     kind: ir::OPKind::Constant(ir::ConstKind::String(ir::SymbolID::insert(
                         &state.ir, s,
@@ -692,14 +826,12 @@ fn visit_expr(
                 },
             );
             ops.push(id);
-            return var;
+            return Some(var);
         }
         ast::ExprKind::GetAttr { exp, sym } => {
-            let expr_id = visit_expr(state, var_map, ops, exp, parent_name);
+            let expr_id = visit_expr(state, var_map, ops, exp, parent_name)?;
             let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
-            let id = state.ir.temporary_id();
-            state.ir.insert_with(
-                id,
+            let id = state.ir.insert(
                 ir::OP {
                     kind: ir::OPKind::GetAttr {
                         obj: expr_id,
@@ -711,14 +843,14 @@ fn visit_expr(
                 },
             );
             ops.push(id);
-            return var;
+            return Some(var);
         }
         ast::ExprKind::MethodCall { exp, sym, args } => {
-            let obj = visit_expr(state, var_map, ops, exp, parent_name);
+            let obj = visit_expr(state, var_map, ops, exp, parent_name)?;
             let var_ids = args
                 .iter()
                 .map(|expr: &ast::Expr| visit_expr(state, var_map, ops, expr, parent_name))
-                .collect();
+                .collect::<Option<_>>()?;
             let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
 
             let op = state.ir.insert(ir::OP {
@@ -731,32 +863,19 @@ fn visit_expr(
                 span: expr.span,
             });
             ops.push(op);
-            var
+            return Some(var);
         }
         ast::ExprKind::Call { path, args } => {
             let var_ids = args
                 .iter()
                 .map(|expr: &ast::Expr| visit_expr(state, var_map, ops, expr, parent_name))
-                .collect();
+                .collect::<Option<_>>()?;
             if is_builtin_fn(path) || state.path_map.get(path).unwrap().kind.is_fn_impl() {
-                let func_id = state
-                    .path_map
-                    .get(path)
-                    .map(|decl| {
-                        *state
-                            .temp
-                            .fn_impl_to_id
-                            .or_insert_with(decl, || state.ir.temporary_id())
-                    })
-                    .unwrap_or_else(|| {
-                        assert!(is_builtin_fn(path));
-                        get_builtin_fn(path, &state.ir)
-                    });
+                let func_id = if is_builtin_fn(path) {get_builtin_fn(path, &state.ir)} else { state.get_function(path, true).unwrap() };
+                    
                 // let func_ret = state.ir.get(func_id).decl.ret_ty;
                 let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
-                let id = state.ir.temporary_id();
-                state.ir.insert_with(
-                    id,
+                let id = state.ir.insert(
                     ir::OP {
                         kind: ir::OPKind::Call {
                             func: func_id,
@@ -767,20 +886,11 @@ fn visit_expr(
                     },
                 );
                 ops.push(id);
-                return var;
+                return Some(var);
             }
             let decl = state.path_map.get(path).unwrap();
             if decl.kind.is_class_impl() {
-                let class_id = state
-                    .path_map
-                    .get(path)
-                    .map(|decl| {
-                        *state
-                            .temp
-                            .class_impl_to_id
-                            .or_insert_with(decl, || state.ir.temporary_id())
-                    })
-                    .unwrap();
+                let class_id = state.get_class(path, true).unwrap();
                 assert!(var_ids.len() == 1);
                 let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
                 let op = state.ir.insert(ir::OP {
@@ -792,19 +902,19 @@ fn visit_expr(
                     res: Some(var),
                 });
                 ops.push(op);
-                return var;
+                return Some(var);
             } else {
                 state.src.add_err(ProgramError {
                     error_message: "expected a function declaration or class implementation",
                     span: Some(path.span),
                     ..Default::default()
                 });
-                return ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
+                return None;
             }
         }
         ast::ExprKind::Add { lhs, rhs } => {
-            let lhs_id = visit_expr(state, var_map, ops, lhs, parent_name);
-            let rhs_id = visit_expr(state, var_map, ops, rhs, parent_name);
+            let lhs_id = visit_expr(state, var_map, ops, lhs, parent_name)?;
+            let rhs_id = visit_expr(state, var_map, ops, rhs, parent_name)?;
             let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
             let id = state.ir.temporary_id();
             state.ir.insert_with(
@@ -819,12 +929,12 @@ fn visit_expr(
                 },
             );
             ops.push(id);
-            return var;
+            return Some(var);
         }
         ast::ExprKind::Struct { args } => {
             let mut field_ids = Vec::new();
             for (sym, expr) in args.iter() {
-                let var_id = visit_expr(state, var_map, ops, expr, parent_name);
+                let var_id = visit_expr(state, var_map, ops, expr, parent_name)?;
                 field_ids.push((ir::SymbolID::insert(&state.ir, &sym.name.view()), var_id));
             }
             let var = ir::VarID::new_var(&state.ir, parent_name, None, Some(expr.span));
@@ -838,7 +948,7 @@ fn visit_expr(
                 },
             );
             ops.push(id);
-            return var;
+            return Some(var);
         }
     }
 }
@@ -848,20 +958,20 @@ fn insert_stmts(
     var_map: &mut HashMap<ir::SymbolID, ir::VarID>,
     ops: &mut Vec<ir::OPID>,
     stmt: &ast::Stmt,
-) {
+) -> Option<()> {
     let op_kind;
     match &stmt.kind {
         ast::StmtKind::ReturnStmt { expr } => {
-            let var = visit_expr(state, var_map, ops, expr, None);
+            let var = visit_expr(state, var_map, ops, expr, None)?;
             op_kind = ir::OPKind::Return { value: var };
         }
         ast::StmtKind::ExprStmt { expr } => {
-            let _var = visit_expr(state, var_map, ops, expr, None);
-            return;
+            let _var = visit_expr(state, var_map, ops, expr, None)?;
+            return Some(());
         }
         ast::StmtKind::LetStmt { var, expr } => {
             let var_sym = ir::SymbolID::insert(&state.ir, var.name.get_str());
-            let expr_id = visit_expr(state, var_map, ops, expr, Some(var_sym));
+            let expr_id = visit_expr(state, var_map, ops, expr, Some(var_sym))?;
             let var_id = ir::VarID::new_var(&state.ir, Some(var_sym), None, Some(stmt.span));
             let op = state.ir.insert(ir::OP {
                 kind: ir::OPKind::Let { value: expr_id },
@@ -874,11 +984,11 @@ fn insert_stmts(
             //     lhs: var_id,
             //     rhs: expr_id,
             // };
-            return;
+            return Some(());
         }
         ast::StmtKind::AssignStmt { lhs, rhs } => {
-            let lhs_id = visit_expr(state, var_map, ops, lhs, None);
-            let rhs_id = visit_expr(state, var_map, ops, rhs, None);
+            let lhs_id = visit_expr(state, var_map, ops, lhs, None)?;
+            let rhs_id = visit_expr(state, var_map, ops, rhs, None)?;
             op_kind = ir::OPKind::Assign {
                 lhs: lhs_id,
                 rhs: rhs_id,
@@ -891,6 +1001,7 @@ fn insert_stmts(
         res: None,
     });
     ops.push(op_id);
+    Some(())
 }
 
 fn visit_class_impl<'a>(state: &mut LowerModule<'a>, decl: &'a ast::Decl) -> Option<ir::ClassID> {
