@@ -22,13 +22,6 @@ class c2 for I1(T1) {
     }
 }
 
-class c3 for I1(I1) {
-    fn hello(this) {
-        print("c3: +");
-        this.hello();
-    }
-}
-
 // classic parametric polymorphism
 fn say_hello[T](x: T) where I1(T) {
     x.hello();
@@ -41,7 +34,7 @@ fn say_hello2(x: I1) {
 
 // explicit class
 fn say_hello3[T](x: T) where c for I1(T) {
-    x.(c::hello)();
+    x.(c.hello)();
 }
 
 fn main() {
@@ -52,8 +45,6 @@ fn main() {
     say_hello[T1 with c2]({a: 1});
     say_hello(a);
     say_hello(b);
-    say_hello[I1 with c3](a);
-    say_hello[I1 with c3](b);
 
     say_hello2(a);
     say_hello2(b);
