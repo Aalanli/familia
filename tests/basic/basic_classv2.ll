@@ -2,7 +2,9 @@
 source_filename = "main"
 
 @str = private unnamed_addr constant [15 x i8] c"Hello, world!\0A\00", align 1
+@str.1 = private unnamed_addr constant [14 x i8] c"Hello again.\0A\00", align 1
 @Foo = global { ptr } { ptr @say_hello }
+@Foo.2 = global { ptr } { ptr @say_hello1 }
 
 define void @say_hello(ptr %this) {
 entry:
@@ -20,6 +22,18 @@ declare ptr @__rts_new_string(i32, ptr)
 
 declare void @__rts_string_print(ptr)
 
+define void @say_hello1(ptr %this1) {
+entry:
+  %this11 = alloca ptr, align 8
+  store ptr %this1, ptr %this11, align 8
+  %"1" = alloca ptr, align 8
+  %0 = call ptr @__rts_new_string(i32 13, ptr @str.1)
+  store ptr %0, ptr %"1", align 8
+  %1 = load ptr, ptr %"1", align 8
+  call void @__rts_string_print(ptr %1)
+  ret void
+}
+
 define void @foo({ ptr, ptr } %a) {
 entry:
   %a1 = alloca { ptr, ptr }, align 8
@@ -30,8 +44,8 @@ entry:
   %2 = extractvalue { ptr, ptr } %0, 1
   %3 = getelementptr inbounds { ptr }, ptr %vtable_ptr, i32 0, i32 0
   %meth = call i8 %3(ptr %2)
-  %"1" = alloca i8, align 1
-  store i8 %meth, ptr %"1", align 1
+  %"2" = alloca i8, align 1
+  store i8 %meth, ptr %"2", align 1
   ret void
 }
 
@@ -55,6 +69,23 @@ entry:
   store { ptr, ptr } %3, ptr %b3, align 8
   %4 = load { ptr, ptr }, ptr %b3, align 8
   call void @foo({ ptr, ptr } %4)
+  %c = alloca i8, align 1
+  %alloc1 = call ptr @__rts_gc_alloc(ptr null, i32 ptrtoint (ptr getelementptr ({ i8 }, ptr null, i32 1) to i32))
+  %get_data2 = call ptr @__rts_get_data(ptr %alloc1)
+  %5 = load i8, ptr %c, align 1
+  %6 = getelementptr inbounds { i8 }, ptr %get_data2, i32 0, i32 0
+  store i8 %5, ptr %6, align 1
+  %c1 = alloca ptr, align 8
+  store ptr %alloc1, ptr %c1, align 8
+  %7 = load ptr, ptr %c1, align 8
+  %data3 = insertvalue { ptr, ptr } { ptr @Foo.2, ptr poison }, ptr %7, 1
+  %c2 = alloca { ptr, ptr }, align 8
+  store { ptr, ptr } %data3, ptr %c2, align 8
+  %8 = load { ptr, ptr }, ptr %c2, align 8
+  %c3 = alloca { ptr, ptr }, align 8
+  store { ptr, ptr } %8, ptr %c3, align 8
+  %9 = load { ptr, ptr }, ptr %c3, align 8
+  call void @foo({ ptr, ptr } %9)
   call void @__rts_gc_destroy()
   ret void
 }
