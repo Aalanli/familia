@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::hash::Hash;
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
-use std::{cell::Cell, collections::HashMap};
+use std::collections::HashMap;
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -10,23 +10,22 @@ pub struct NodeID {
     pub id: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Registry<T: ?Sized> {
     data: RefCell<HashMap<u32, Box<T>>>,
-    id: Cell<u32>,
+    id: AtomicU32,
 }
 
 impl<T: ?Sized> Registry<T> {
     pub fn new() -> Self {
         Registry {
             data: RefCell::new(HashMap::new()),
-            id: Cell::new(1), // treat 0 as None, or empty, since Default for NodeID is 0
+            id: AtomicU32::new(1), // treat 0 as None, or empty, since Default for NodeID is 0
         }
     }
 
     pub fn temporary_id(&self) -> NodeID {
-        let id = self.id.get();
-        self.id.set(id + 1);
+        let id = self.id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         NodeID { id }
     }
 
@@ -54,15 +53,18 @@ impl<T: ?Sized> Registry<T> {
     }
 
     pub fn insert(&self, value: Box<T>) -> NodeID {
-        let id = self.id.get();
+        let id = self.id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.data.borrow_mut().insert(id, value);
-        self.id.set(id + 1);
         let id = NodeID { id };
         id
     }
 
     pub fn pop(&mut self, id: NodeID) -> Option<Box<T>> {
         self.data.borrow_mut().remove(&id.id)
+    }
+
+    pub fn id(&self) -> &AtomicU32 {
+        &self.id
     }
 }
 
@@ -137,6 +139,10 @@ impl GenericUniqueRegistry {
     pub fn temporary_id(&self) -> NodeID {
         let id = self.id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         NodeID { id }
+    }
+
+    pub fn id(&self) -> &AtomicU32 {
+        &self.id
     }
 }
 

@@ -15,7 +15,7 @@ pub trait IDVisitor {
     fn visit<I: ID>(&mut self, id: I);
 }
 
-pub trait IRNode {
+pub trait IRNode: Hash + Eq + 'static {
     fn visit_ids<V: IDVisitor>(&self, v: &mut V);
 }
 
@@ -40,6 +40,26 @@ impl<T: Display + 'static> Attribute for T {
     fn name(&self) -> &'static str {
         std::any::type_name::<T>()
     }
+}
+
+pub struct Context {
+
+}
+
+impl Context {
+    pub fn builder(&mut self, f: impl FnOnce(IRShard)) {}
+
+    pub fn pass<I: ID>(&mut self, f: impl Fn(I)) {}
+}
+
+pub struct State<'ctx, T> {
+    t: &'ctx T
+}
+
+
+
+pub struct IRShard<'ctx> {
+    ctx: &'ctx Context
 }
 
 pub struct IR {
@@ -172,8 +192,8 @@ impl IR {
 }
 
 pub trait ID: Copy + Eq + Ord + Hash + 'static {
-    type Node: IRNode + Hash + Eq + 'static;
-    const IS_UNIQUE: bool;
+    type Node: IRNode;
+    const IS_UNIQUE: bool = false;
     fn get(&self) -> NodeID;
     fn wrap(node: NodeID) -> Self;
 }
@@ -188,21 +208,38 @@ impl<T: ID> CheckNotUnique for T {
 
 #[macro_export]
 macro_rules! impl_id {
-    ($id:ident, $node:ident, $unique:ident) => {
+    ($id:ident, $node:ident) => {
         #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $id(NodeID);
 
         impl ID for $id {
             type Node = $node;
-            const IS_UNIQUE: bool = $unique;
-            fn id(&self) -> NodeID {
+            fn get(&self) -> NodeID {
                 self.0
             }
 
-            fn new(node: NodeID) -> Self {
+            fn wrap(node: NodeID) -> Self {
+                $id(node)
+            }
+        }
+    };
+
+    ($id:ident, $node:ident, unique) => {
+        #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        pub struct $id(NodeID);
+
+        impl ID for $id {
+            type Node = $node;
+            const IS_UNIQUE: bool = true;
+            fn get(&self) -> NodeID {
+                self.0
+            }
+
+            fn wrap(node: NodeID) -> Self {
                 $id(node)
             }
         }
     };
 }
+
 
