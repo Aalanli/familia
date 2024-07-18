@@ -5,6 +5,7 @@ mod parser;
 pub mod prelude;
 pub mod query;
 pub mod transforms;
+pub mod context;
 
 use std::{
     cell::RefCell,
