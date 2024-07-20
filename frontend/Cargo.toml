@@ -15,3 +15,12 @@ either = "1.12.0"
 im = "15.1.0"
 lazy_static = "1.5.0"
 colored = "2.1.0"
+log = "0.4.22"
+annotate-snippets = "0.11.4"
+
+[dev-dependencies]
+insta = { version = "1.39.0", features = ["yaml"] }
+
+[profile.dev.package]
+insta.opt-level = 3
+similar.opt-level = 3
