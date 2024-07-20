@@ -7,6 +7,27 @@ pub use lexer::{Ident, LexError, Lexer, Loc, Span, Symbol, Tok};
 pub mod ptr;
 pub use ptr::P;
 
+mod ast;
+
+#[derive(Default)]
+#[salsa::db]
+pub struct Database {
+    storage: salsa::Storage<Self>,
+}
+
+#[salsa::db]
+impl salsa::Database for Database {}
+
+#[salsa::input]
+pub struct ProgramSrc {
+    #[return_ref]
+    file: Option<String>,
+    #[return_ref]
+    text: String,
+}
+
+
+
 #[derive(Clone, Debug)]
 pub struct Var {
     pub name: Ident,
