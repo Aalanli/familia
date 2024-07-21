@@ -151,7 +151,6 @@ pub enum ExprKind<'db> {
     },
 }
 
-
 #[salsa::accumulator]
 #[derive(new)]
 pub struct Diagnostic {

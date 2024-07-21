@@ -8,7 +8,6 @@ pub struct Span {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Loc {
-    pub global: usize,
     pub line: u64,
     pub start: u32,
 }
@@ -16,7 +15,6 @@ pub struct Loc {
 impl Default for Loc {
     fn default() -> Self {
         Loc {
-            global: 0,
             line: 0,
             start: 0,
         }
@@ -275,7 +273,6 @@ impl<T: Iterator<Item = char>> Lexer<T> {
 
     fn get_loc(&self) -> Loc {
         Loc {
-            global: self.global_pos,
             line: self.line_num,
             start: self.line_pos,
         }
