@@ -16,7 +16,6 @@ use crate::Diagnostic as E;
 grammar<'db>(db: &'db dyn Db);
 
 
-
 pub Stmt : Option<Stmt<'db>> = <w:WithSpan<StmtKind>> => {
     let (kind, span) = w;
     Some(Stmt { kind: kind?, span })
