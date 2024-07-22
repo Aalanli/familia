@@ -1,19 +1,14 @@
 use std::any::{self, Any, TypeId};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::hash::Hash;
-use std::rc::Rc;
 use std::sync::atomic::AtomicU32;
-use std::sync::Mutex;
 
+use anyhow::Result;
 use derive_new::new;
 
 mod registry;
-
-use im::Vector;
 use registry::Registry;
-
 
 pub trait DefaultIdentity: 'static {
     fn default_hash(&self) -> u64;
@@ -56,43 +51,26 @@ impl Hash for dyn DefaultIdentity {
     }
 }
 
-
-/// Attributes are information computed in the passes
-/// they are uniqued by type to each node
-/// as_str expects a single line string
-pub trait Attribute: 'static {
-    fn as_any(&self) -> &dyn Any;
-    fn as_str(&self) -> String;
-    fn name(&self) -> &'static str;
-}
-
-impl<T: Display + 'static> Attribute for T {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_str(&self) -> String {
-        self.to_string()
-    }
-
-    fn name(&self) -> &'static str {
-        std::any::type_name::<T>()
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeId(u32);
 
-
-pub struct IR {
+#[derive(new)]
+pub struct Db {
+    #[new(default)]
     globals: HashMap<any::TypeId, Box<dyn Any>>,
-    attributes: Registry<u32, Registry<any::TypeId, dyn Attribute>>,
-    registry: Registry<u32, dyn Any>,
-    unique_registry: RefCell<HashMap<Box<dyn DefaultIdentity>, u32>>,
-    id: AtomicU32
+    #[new(value = "Registry::new()")]
+    attributes: Registry<NodeId, Registry<any::TypeId, dyn Any>>,
+    #[new(value = "Registry::new()")]
+    registry: Registry<NodeId, dyn Any>,
+    #[new(value = "Registry::new()")]
+    unique_registry: Registry<NodeId, dyn DefaultIdentity>,
+    #[new(default)]
+    unique_keys: RefCell<HashMap<Box<dyn DefaultIdentity>, NodeId>>,
+    #[new(default)]
+    id: AtomicU32,
 }
 
-impl IR {
+impl Db {
     fn new_id(&self) -> NodeId {
         NodeId(self.id.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
     }
@@ -101,28 +79,197 @@ impl IR {
         self.globals.insert(value.type_id(), Box::new(value));
     }
 
-    pub fn get_global<T: 'static>(&self) -> Option<&T> {
+    pub fn get_resource<T: 'static>(&self) -> Option<&T> {
         self.globals
             .get(&std::any::TypeId::of::<T>())
             .and_then(|any| any.downcast_ref::<T>())
     }
 
-    pub fn get_global_mut<T: 'static>(&mut self) -> Option<&mut T> {
+    pub fn get_resource_mut<T: 'static>(&mut self) -> Option<&mut T> {
         self.globals
             .get_mut(&std::any::TypeId::of::<T>())
             .and_then(|any| any.downcast_mut::<T>())
     }
 
+    pub fn has_attribute<T: 'static>(&self, id: NodeId) -> bool {
+        self.get_attribute::<T>(id).is_some()
+    }
+
+    pub fn add_attribute<T: 'static>(&self, id: NodeId, attr: T) -> Result<()> {
+        let map = self
+            .attributes
+            .get_insert_with(id, || Box::new(Registry::new()));
+        map.insert_with(any::TypeId::of::<T>(), Box::new(attr))
+    }
+
+    pub fn get_attribute<T: 'static>(&self, id: NodeId) -> Option<&T> {
+        self.attributes
+            .get(id)?
+            .get(TypeId::of::<T>())?
+            .downcast_ref::<T>()
+    }
+
+    pub fn pop_attribute<T: 'static>(&mut self, id: NodeId) -> Option<T> {
+        let attr = self.attributes.get_mut(id)?.pop(TypeId::of::<T>())?;
+        if let Ok(x) = attr.downcast::<T>() {
+            Some(*x)
+        } else {
+            None
+        }
+    }
+
+    pub fn insert_unique(&self, x: impl DefaultIdentity + Clone) -> NodeId {
+        let y: &dyn DefaultIdentity = &x;
+        let mut regs = self.unique_keys.borrow_mut();
+        if let Some(k) = regs.get(y) {
+            return *k;
+        }
+        let id = self.new_id();
+        regs.insert(Box::new(x.clone()), id);
+        self.unique_registry.insert_with(id, Box::new(x)).unwrap();
+        id
+    }
+
+    pub fn insert(&self, x: impl Any) -> NodeId {
+        let id = self.new_id();
+        self.registry.insert_with(id, Box::new(x)).unwrap();
+        id
+    }
+
+    pub fn get(&self, id: NodeId) -> &dyn Any {
+        self.registry.get(id).unwrap()
+    }
+
+    pub fn get_unique(&self, id: NodeId) -> &dyn Any {
+        self.unique_registry.get(id).unwrap().as_any()
+    }
+
+    pub fn get_mut(&mut self, id: NodeId) -> &mut dyn Any {
+        self.registry.get_mut(id).unwrap()
+    }
+
+    pub fn pop(&mut self, id: NodeId) -> Box<dyn Any> {
+        self.registry.pop(id).unwrap()
+    }
 }
 
 #[macro_export]
 macro_rules! impl_id {
     ($id:ident, $node:ident) => {
         #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-        pub struct $id(NodeID);
+        pub struct $id(crate::context::NodeId);
 
+        #[allow(dead_code)]
         impl $id {
-            
+            pub fn new(ir: &crate::context::Db, node: $node) -> $id {
+                $id(ir.insert(node))
+            }
+
+            pub fn get<'a>(&self, ir: &'a crate::context::Db) -> &'a $node {
+                ir.get(self.0).downcast_ref::<$node>().unwrap()
+            }
+
+            pub fn get_mut<'a>(&self, ir: &'a mut crate::context::Db) -> &'a mut $node {
+                ir.get_mut(self.0).downcast_mut::<$node>().unwrap()
+            }
+
+            pub fn pop(&self, ir: &mut crate::context::Db) -> $node {
+                *ir.pop(self.0).downcast::<$node>().unwrap()
+            }
+
+            pub fn get_attribute<'a, T: 'static>(
+                &self,
+                ir: &'a crate::context::Db,
+            ) -> Option<&'a T> {
+                ir.get_attribute(self.0)
+            }
+
+            pub fn add_attribute<T: 'static>(
+                &self,
+                attr: T,
+                ir: &crate::context::Db,
+            ) -> Result<()> {
+                ir.add_attribute(self.0, attr)
+            }
+
+            pub fn has_attribute<T: 'static>(&self, ir: &crate::context::Db) -> bool {
+                ir.has_attribute::<T>(self.0)
+            }
+
+            pub fn pop_attribute<T: 'static>(&self, ir: &mut crate::context::Db) -> Option<T> {
+                ir.pop_attribute(self.0)
+            }
+
+            pub fn dyn_id(&self) -> crate::context::NodeId {
+                self.0
+            }
         }
     };
+
+    ($id:ident, intern $node:ident) => {
+        #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        pub struct $id(crate::context::NodeId);
+
+        #[allow(dead_code)]
+        impl $id {
+            pub fn new(ir: &crate::context::Db, node: $node) -> $id {
+                $id(ir.insert_unique(node))
+            }
+
+            pub fn get<'a>(&self, ir: &'a crate::context::Db) -> &'a $node {
+                ir.get_unique(self.0).downcast_ref::<$node>().unwrap()
+            }
+
+            pub fn get_attribute<'a, T: 'static>(
+                &self,
+                ir: &'a crate::context::Db,
+            ) -> Option<&'a T> {
+                ir.get_attribute(self.0)
+            }
+
+            pub fn add_attribute<T: 'static>(
+                &self,
+                attr: T,
+                ir: &crate::context::Db,
+            ) -> Result<()> {
+                ir.add_attribute(self.0, attr)
+            }
+
+            pub fn has_attribute<T: 'static>(&self, ir: &crate::context::Db) -> bool {
+                ir.has_attribute::<T>(self.0)
+            }
+
+            pub fn pop_attribute<T: 'static>(&self, ir: &mut crate::context::Db) -> Option<T> {
+                ir.pop_attribute(self.0)
+            }
+
+            pub fn dyn_id(&self) -> crate::context::NodeId {
+                self.0
+            }
+        }
+    };
+}
+
+#[cfg(test)]
+mod test_ctx {
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    pub struct Bar(i32);
+
+    impl_id!(BarId, intern Bar);
+
+    #[test]
+    fn test() {
+        let ir = Db::new();
+        let id = BarId::new(&ir, Bar(2));
+        let id2 = BarId::new(&ir, Bar(2));
+        assert_eq!(id, id2);
+        let bar = id.get(&ir);
+        insta::assert_debug_snapshot!(bar, @r###"
+        Bar(
+            2,
+        )
+        "###);
+    }
 }

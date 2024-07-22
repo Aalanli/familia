@@ -1,16 +1,15 @@
 use std::cell::RefCell;
-use std::hash::Hash;
-use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::hash::Hash;
 
-type Idx = u32;
+use anyhow::{anyhow, Result};
 
 #[derive(Debug)]
 pub struct Registry<Idx, T: ?Sized> {
     data: RefCell<HashMap<Idx, Box<T>>>,
 }
 
-impl<Idx: Eq + Hash, T: ?Sized> Registry<Idx, T> {
+impl<Idx: Eq + Hash + Copy, T: ?Sized> Registry<Idx, T> {
     pub fn new() -> Self {
         Registry {
             data: RefCell::new(HashMap::new()),
@@ -36,13 +35,26 @@ impl<Idx: Eq + Hash, T: ?Sized> Registry<Idx, T> {
         }
     }
 
-    pub fn insert_with(&self, id: Idx, value: Box<T>) {
-        let data = self.data.borrow_mut();
+    pub fn insert_with(&self, id: Idx, value: Box<T>) -> Result<()> {
+        let mut data = self.data.borrow_mut();
         if data.contains_key(&id) {
-            panic!("cannot insert duplicate key");
+            return Err(anyhow!("cannot insert duplicate key"));
         }
 
-        self.data.borrow_mut().insert(id, value);
+        data.insert(id, value);
+        Ok(())
+    }
+
+    pub fn get_insert_with(&self, id: Idx, f: impl FnOnce() -> Box<T>) -> &T {
+        if let Some(x) = self.get(id) {
+            return x;
+        } else {
+            let mut data = self.data.borrow_mut();
+            if !data.contains_key(&id) {
+                data.insert(id, f());
+            }
+        }
+        self.get(id).unwrap()
     }
 
     pub fn pop(&mut self, id: Idx) -> Option<Box<T>> {

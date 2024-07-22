@@ -1,11 +1,11 @@
 pub mod ast;
+pub mod context;
 pub mod error;
 pub mod ir;
 mod parser;
 pub mod prelude;
 pub mod query;
 pub mod transforms;
-pub mod context;
 
 use std::{
     cell::RefCell,
