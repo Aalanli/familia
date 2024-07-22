@@ -1,23 +1,61 @@
 use std::any::{self, Any, TypeId};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::hash::Hash;
+use std::rc::Rc;
+use std::sync::atomic::AtomicU32;
 use std::sync::Mutex;
+
+use derive_new::new;
 
 mod registry;
 
 use im::Vector;
-pub use registry::NodeID;
-use registry::{GenericUniqueRegistry, Registry};
+use registry::Registry;
 
 
-pub trait IDVisitor {
-    fn visit<I: ID>(&mut self, id: I);
+pub trait DefaultIdentity: 'static {
+    fn default_hash(&self) -> u64;
+    fn default_compare(&self, other: &dyn DefaultIdentity) -> bool;
+    fn as_any(&self) -> &dyn Any;
 }
 
-pub trait IRNode: Hash + Eq + 'static {
-    fn visit_ids<V: IDVisitor>(&self, v: &mut V);
+impl<T: Hash + Eq + 'static> DefaultIdentity for T {
+    fn default_hash(&self) -> u64 {
+        use std::hash::Hasher;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn default_compare(&self, other: &dyn DefaultIdentity) -> bool {
+        if let Some(other) = other.as_any().downcast_ref::<T>() {
+            self == other
+        } else {
+            false
+        }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
+
+impl PartialEq for dyn DefaultIdentity {
+    fn eq(&self, other: &Self) -> bool {
+        self.default_compare(other)
+    }
+}
+
+impl Eq for dyn DefaultIdentity {}
+
+impl Hash for dyn DefaultIdentity {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.default_hash().hash(state);
+    }
+}
+
 
 /// Attributes are information computed in the passes
 /// they are uniqued by type to each node
@@ -42,46 +80,24 @@ impl<T: Display + 'static> Attribute for T {
     }
 }
 
-pub struct Context {
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NodeId(u32);
 
-}
-
-impl Context {
-    pub fn builder(&mut self, f: impl FnOnce(IRShard)) {}
-
-    pub fn pass<I: ID>(&mut self, f: impl Fn(I)) {}
-}
-
-pub struct State<'ctx, T> {
-    t: &'ctx T
-}
-
-
-
-pub struct IRShard<'ctx> {
-    ctx: &'ctx Context
-}
 
 pub struct IR {
     globals: HashMap<any::TypeId, Box<dyn Any>>,
-    attributes: HashMap<NodeID, HashMap<any::TypeId, Box<dyn Attribute>>>,
-    registry: Registry<dyn Any>,
-    unique_registry: GenericUniqueRegistry,
-    ids: Mutex<HashMap<TypeId, Vector<NodeID>>>,
+    attributes: Registry<u32, Registry<any::TypeId, dyn Attribute>>,
+    registry: Registry<u32, dyn Any>,
+    unique_registry: RefCell<HashMap<Box<dyn DefaultIdentity>, u32>>,
+    id: AtomicU32
 }
 
 impl IR {
-    pub fn new() -> Self {
-        IR {
-            globals: HashMap::new(),
-            registry: Registry::new(),
-            attributes: HashMap::new(),
-            unique_registry: GenericUniqueRegistry::new(),
-            ids: Mutex::new(HashMap::new())
-        }
+    fn new_id(&self) -> NodeId {
+        NodeId(self.id.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
     }
 
-    pub fn insert_global(&mut self, value: impl Any) {
+    pub fn insert_resource(&mut self, value: impl Any) {
         self.globals.insert(value.type_id(), Box::new(value));
     }
 
@@ -97,113 +113,6 @@ impl IR {
             .and_then(|any| any.downcast_mut::<T>())
     }
 
-    pub fn delete<I: ID>(&mut self, id: I) {
-        if I::IS_UNIQUE {
-            self.unique_registry.delete(id.get());
-        } else {
-            self.registry.pop(id.get());
-        }
-        let mut ids = self.ids.lock().unwrap();
-        if let Some(ids) = ids.get_mut(&id.type_id()) {
-            if let Ok(id) = ids.binary_search(&id.get()) {
-                ids.remove(id);
-            }
-        }
-    }
-
-    pub fn get<I: ID>(&self, id: I) -> &I::Node {
-        if I::IS_UNIQUE {
-            let res = self.unique_registry.get(id.get()).unwrap();
-            res.as_any().downcast_ref::<I::Node>().unwrap()
-        } else {
-            let any = self.registry.get(id.get()).unwrap();
-            any.downcast_ref::<I::Node>().unwrap()
-        }
-    }
-
-    pub fn get_mut<I: ID>(&mut self, id: I) -> &mut I::Node {
-        // a hacky way to enforce during compile time that I is not unique
-        let _ = I::CHECK;
-        let any = self.registry.get_mut(id.get()).unwrap();
-        any.downcast_mut::<I::Node>().unwrap()
-    }
-
-    pub fn insert<I: ID>(&self, node: I::Node) -> I {
-        let id;
-        if I::IS_UNIQUE {
-            id = self.unique_registry.insert(node);
-        } else {
-            id = self.registry.insert(Box::new(node));
-        }
-
-        let mut ids = self.ids.lock().unwrap();
-        let tid = TypeId::of::<I>();
-        if !ids.contains_key(&tid) {
-            ids.insert(tid, Vector::new());
-        }
-        ids.get_mut(&tid).unwrap().push_back(id);
-
-        I::wrap(id)
-    }
-
-    pub fn insert_with<I: ID>(&self, id: I, node: I::Node) {
-        if I::IS_UNIQUE {
-            self.unique_registry.insert_with(id.get(), node).unwrap();
-        } else {
-            self.registry.insert_with(id.get(), Box::new(node));
-        }
-
-        let mut ids = self.ids.lock().unwrap();
-        let tid = TypeId::of::<I>();
-        if !ids.contains_key(&tid) {
-            ids.insert(tid, Vector::new());
-        }
-        ids.get_mut(&tid).unwrap().insert_ord(id.get());
-    }
-
-    pub fn temporary_id<I: ID>(&self) -> I {
-        if I::IS_UNIQUE {
-            I::wrap(self.unique_registry.temporary_id())
-        } else {
-            I::wrap(self.registry.temporary_id())
-        }
-    }
-
-    pub fn insert_attribute<A: Attribute, I: ID>(&mut self, id: I, attr: A) {
-        let map = self.attributes.entry(id.get()).or_insert_with(HashMap::new);
-        map.insert(any::TypeId::of::<A>(), Box::new(attr));
-    }
-
-    pub fn get_attribute<A: Attribute, I: ID>(&self, id: I) -> Option<&A> {
-        let map = self.attributes.get(&id.get())?;
-        map.get(&any::TypeId::of::<A>())?
-            .as_any()
-            .downcast_ref::<A>()
-    }
-
-    pub fn iter<I: ID>(&self) -> impl Iterator<Item = I> {
-        let mut ids = self.ids.lock().unwrap();
-        let tid = TypeId::of::<I>();
-        if !ids.contains_key(&tid) {
-            ids.insert(tid, Vector::new());
-        }
-        ids.get(&tid).unwrap().clone().into_iter().map(|x| I::wrap(x))
-    }
-}
-
-pub trait ID: Copy + Eq + Ord + Hash + 'static {
-    type Node: IRNode;
-    const IS_UNIQUE: bool = false;
-    fn get(&self) -> NodeID;
-    fn wrap(node: NodeID) -> Self;
-}
-
-trait CheckNotUnique: ID {
-    const CHECK: ();
-}
-
-impl<T: ID> CheckNotUnique for T {
-    const CHECK: () = [()][T::IS_UNIQUE as usize];
 }
 
 #[macro_export]
@@ -212,34 +121,8 @@ macro_rules! impl_id {
         #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $id(NodeID);
 
-        impl ID for $id {
-            type Node = $node;
-            fn get(&self) -> NodeID {
-                self.0
-            }
-
-            fn wrap(node: NodeID) -> Self {
-                $id(node)
-            }
-        }
-    };
-
-    ($id:ident, $node:ident, unique) => {
-        #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-        pub struct $id(NodeID);
-
-        impl ID for $id {
-            type Node = $node;
-            const IS_UNIQUE: bool = true;
-            fn get(&self) -> NodeID {
-                self.0
-            }
-
-            fn wrap(node: NodeID) -> Self {
-                $id(node)
-            }
+        impl $id {
+            
         }
     };
 }
-
-
