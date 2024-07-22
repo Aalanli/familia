@@ -1,6 +1,6 @@
 pub mod ast;
-pub mod context;
 pub mod ast2;
+pub mod context;
 pub mod error;
 pub mod ir;
 mod lexer;
@@ -11,7 +11,11 @@ pub mod query;
 pub mod transforms;
 
 use std::{
-    cell::RefCell, collections::HashSet, fmt::{Debug, Display}, hash::Hash, ops::Deref, rc::Rc
+    cell::RefCell,
+    collections::HashSet,
+    fmt::{Debug, Display},
+    hash::Hash,
+    rc::Rc,
 };
 
 use derive_new::new;
@@ -67,9 +71,8 @@ fn test(db: &dyn Db) {
 #[derive(Debug, Clone)]
 pub enum ErrorKind {
     Error,
-    Warning
+    Warning,
 }
-
 
 pub use parser::parse;
 pub use transforms::{ast_to_ir, transform_ir};

@@ -1,8 +1,8 @@
 use lalrpop_util::{lalrpop_mod, ParseError};
 
-use crate::{Db, ProgramSource};
-use crate::lexer::Lexer;
 use crate::ast2::Module;
+use crate::lexer::Lexer;
+use crate::{Db, ProgramSource};
 
 lalrpop_mod!(pub familia2);
 
@@ -10,7 +10,6 @@ lalrpop_mod!(pub familia2);
 pub fn parse<'db>(db: &'db dyn Db, src: ProgramSource) {
     // let k = familia2::TestParser::new().parse(db, "tokens".chars());
 }
-
 
 #[cfg(test)]
 mod test_parse {
@@ -27,9 +26,9 @@ mod test_parse {
     //         Err(error) => {
     //             let err = ErrorRecovery { error, vec![] };
     //             Diagnostic::report_parse_err(&db, err);
-    //             let errors = 
+    //             let errors =
     //         }
     //     }
-        
+
     // }
 }

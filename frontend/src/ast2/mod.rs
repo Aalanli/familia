@@ -1,7 +1,7 @@
 use std::ops::ControlFlow;
 
-use derive_new::new;
 use crate::ProgramSource;
+use derive_new::new;
 
 pub use super::lexer::Span;
 
@@ -13,13 +13,13 @@ pub fn P<T>(x: T) -> Box<T> {
 #[salsa::interned]
 pub struct Symbol<'db> {
     #[return_ref]
-    pub sym: String
+    pub sym: String,
 }
 
 #[salsa::interned]
 pub struct Path<'db> {
     #[return_ref]
-    pub symbols: Vec<Symbol<'db>>
+    pub symbols: Vec<Symbol<'db>>,
 }
 
 #[derive(Eq, PartialEq, Copy, Clone, Hash, Debug, salsa::Update)]
@@ -31,9 +31,8 @@ pub struct PathSpan<'db> {
 #[derive(Eq, PartialEq, Copy, Clone, Hash, Debug, salsa::Update)]
 pub struct SymbolSpan<'db> {
     pub sym: Symbol<'db>,
-    pub span: Span
+    pub span: Span,
 }
-
 
 #[salsa::interned]
 pub struct Type<'db> {
@@ -53,7 +52,7 @@ pub enum TypeKind<'db> {
 pub struct Var<'db> {
     pub name: SymbolSpan<'db>,
     pub ty: Option<Type<'db>>,
-    pub span: Span
+    pub span: Span,
 }
 
 impl<'db> Var<'db> {
@@ -61,7 +60,11 @@ impl<'db> Var<'db> {
         if self.ty.is_none() {
             crate::Diagnostic::report_syntax_err(db, "expected type annotation");
         }
-        Some(TypedVar { name: self.name, ty: self.ty?, span: self.span })
+        Some(TypedVar {
+            name: self.name,
+            ty: self.ty?,
+            span: self.span,
+        })
     }
 }
 
@@ -69,9 +72,8 @@ impl<'db> Var<'db> {
 pub struct TypedVar<'db> {
     pub name: SymbolSpan<'db>,
     pub ty: Type<'db>,
-    pub span: Span
+    pub span: Span,
 }
-
 
 #[salsa::tracked]
 pub struct Module<'db> {
@@ -81,7 +83,7 @@ pub struct Module<'db> {
     #[return_ref]
     pub body: Vec<Decls<'db>>,
 
-    pub src: ProgramSource
+    pub src: ProgramSource,
 }
 
 #[salsa::tracked]
@@ -90,7 +92,7 @@ pub struct InterfaceDecl<'db> {
     pub name: Symbol<'db>,
     pub name_span: Span,
     #[return_ref]
-    pub body: Vec<Decls<'db>>
+    pub body: Vec<Decls<'db>>,
 }
 
 #[salsa::tracked]
@@ -100,7 +102,7 @@ pub struct ClassImpl<'db> {
     pub name_span: Span,
     pub for_it: Option<Path<'db>>,
     #[return_ref]
-    pub body: Vec<Decls<'db>>
+    pub body: Vec<Decls<'db>>,
 }
 
 #[salsa::tracked]
@@ -139,13 +141,13 @@ pub enum Decls<'db> {
     Class(ClassImpl<'db>),
     FnDecl(FnDecl<'db>),
     FnImpl(FnImpl<'db>),
-    TyDecl(TypeDecl<'db>)
+    TyDecl(TypeDecl<'db>),
 }
 
 #[derive(Eq, PartialEq, Clone, Hash, Debug, salsa::Update)]
 pub struct Stmt<'db> {
     pub kind: StmtKind<'db>,
-    pub span: Span
+    pub span: Span,
 }
 
 #[derive(Eq, PartialEq, Clone, Hash, Debug, salsa::Update)]
@@ -153,7 +155,7 @@ pub enum StmtKind<'db> {
     LetStmt { var: Var<'db>, expr: Expr<'db> },
     ExprStmt(Expr<'db>),
     AssignStmt { lhs: Expr<'db>, rhs: Expr<'db> },
-    ReturnStmt(Expr<'db>)
+    ReturnStmt(Expr<'db>),
 }
 
 #[derive(Eq, PartialEq, Clone, Hash, Debug, salsa::Update)]
@@ -189,7 +191,6 @@ pub enum ExprKind<'db> {
         args: Vec<(SymbolSpan<'db>, Expr<'db>)>,
     },
 }
-
 
 pub trait Visitor<'db>: Sized {
     type Result: VisitorResult;
@@ -281,5 +282,23 @@ macro_rules! walk_visitable_list {
         for elem in $list {
             $crate::try_visit!(elem.visit_with($visitor $(, $($extra_args,)* )?));
         }
+    }
+}
+
+#[cfg(test)]
+mod test_ast {
+    #[salsa::interned]
+    struct Foo<'db> {
+        pub name: String,
+        #[no_eq]
+        pub idx: i32
+    }
+
+    #[test]
+    fn test_intern_eq() {
+        let db = salsa::default_database();
+        let foo1 = Foo::new(&db, "name".into(), 1);
+        let foo2 = Foo::new(&db, "name".into(), 2);
+        assert!(foo1 != foo2);
     }
 }

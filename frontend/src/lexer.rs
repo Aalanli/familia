@@ -14,10 +14,7 @@ pub struct Loc {
 
 impl Default for Loc {
     fn default() -> Self {
-        Loc {
-            line: 0,
-            start: 0,
-        }
+        Loc { line: 0, start: 0 }
     }
 }
 

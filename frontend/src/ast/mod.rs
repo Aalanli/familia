@@ -1,10 +1,8 @@
-
-use std::fmt::Display;
 pub use crate::lexer::{Ident, LexError, Lexer, Loc, Span, Symbol, Tok};
+use std::fmt::Display;
 
 pub mod ptr;
 pub use ptr::P;
-
 
 #[salsa::input]
 pub struct ProgramSrc {
@@ -13,7 +11,6 @@ pub struct ProgramSrc {
     #[return_ref]
     text: String,
 }
-
 
 #[derive(Clone, Debug)]
 pub struct Var {
