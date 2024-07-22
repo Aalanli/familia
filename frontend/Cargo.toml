@@ -18,6 +18,7 @@ colored = "2.1.0"
 log = "0.4.22"
 annotate-snippets = "0.11.4"
 derive-new = "0.6.0"
+salsa = { git = "https://github.com/salsa-rs/salsa" }
 
 [dev-dependencies]
 insta = { version = "1.39.0", features = ["yaml"] }

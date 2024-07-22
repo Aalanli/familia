@@ -1,11 +1,19 @@
-mod lexer;
 
 use std::fmt::Display;
-
-pub use lexer::{Ident, LexError, Lexer, Loc, Span, Symbol, Tok};
+pub use crate::lexer::{Ident, LexError, Lexer, Loc, Span, Symbol, Tok};
 
 pub mod ptr;
 pub use ptr::P;
+
+
+#[salsa::input]
+pub struct ProgramSrc {
+    #[return_ref]
+    file: Option<String>,
+    #[return_ref]
+    text: String,
+}
+
 
 #[derive(Clone, Debug)]
 pub struct Var {

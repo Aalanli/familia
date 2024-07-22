@@ -1,19 +1,75 @@
 pub mod ast;
 pub mod context;
+pub mod ast2;
 pub mod error;
 pub mod ir;
+mod lexer;
 mod parser;
+pub mod parser2;
 pub mod prelude;
 pub mod query;
 pub mod transforms;
 
 use std::{
-    cell::RefCell,
-    collections::HashSet,
-    fmt::{Debug, Display},
-    hash::Hash,
-    rc::Rc,
+    cell::RefCell, collections::HashSet, fmt::{Debug, Display}, hash::Hash, ops::Deref, rc::Rc
 };
+
+use derive_new::new;
+use salsa::{Accumulator, Database as Db};
+
+#[derive(Default)]
+#[salsa::db]
+pub struct Database {
+    storage: salsa::Storage<Self>,
+}
+
+#[salsa::db]
+impl salsa::Database for Database {}
+
+#[salsa::input]
+pub struct ProgramSource {
+    #[return_ref]
+    pub file: String,
+
+    #[return_ref]
+    pub text: String,
+}
+
+#[salsa::accumulator]
+#[derive(new)]
+pub struct Diagnostic {
+    pub span: lexer::Span,
+    pub msg: String,
+    #[new(value = "ErrorKind::Error")]
+    pub kind: ErrorKind,
+}
+
+impl Diagnostic {
+    fn report(db: &dyn Db, span: lexer::Span, msg: impl Into<String>) {
+        Diagnostic::new(span, msg.into()).accumulate(db);
+    }
+
+    fn report_syntax_err(db: &dyn Db, msg: impl Into<String>) {
+        todo!()
+    }
+
+    fn report_parse_err(db: &dyn Db, err: ErrorRecovery<lexer::Loc, lexer::Tok, lexer::LexError>) {
+        todo!()
+    }
+}
+use lalrpop_util::ErrorRecovery;
+
+fn test(db: &dyn Db) {
+    let src = ProgramSource::new(db, "file, text".into(), "test".into());
+    let txt = src.text(db);
+}
+
+#[derive(Debug, Clone)]
+pub enum ErrorKind {
+    Error,
+    Warning
+}
+
 
 pub use parser::parse;
 pub use transforms::{ast_to_ir, transform_ir};

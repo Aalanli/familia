@@ -1,0 +1,143 @@
+use crate::lexer::{Loc, Ident, Span, Tok, LexError};
+use crate::ast2::{
+    P,
+    Symbol, Path, SymbolSpan, PathSpan, Type, TypeKind, 
+    Var, TypedVar,
+    InterfaceDecl,
+    ClassImpl,
+    FnDecl,
+    FnImpl,
+    TypeDecl,
+    Decls, Stmt, StmtKind, Expr, ExprKind
+};
+use crate::Db;
+use crate::Diagnostic as E;
+
+grammar<'db>(db: &'db dyn Db);
+
+
+pub Stmt : Option<Stmt<'db>> = <w:WithSpan<StmtKind>> => {
+    let (kind, span) = w;
+    Some(Stmt { kind: kind?, span })
+};
+
+StmtKind : Option<StmtKind<'db>> = {
+    "let" <v:Var> "=" <e:Expr> ";" => Some(StmtKind::LetStmt { var:v, expr:e? }),
+    <e:Expr> ";" => Some(StmtKind::ExprStmt(e?)),
+    <lhs:Expr> "=" <rhs:Expr> ";" => Some(StmtKind::AssignStmt { lhs: lhs?, rhs: rhs? }),
+    "return" <expr:Expr> ";" => Some(StmtKind::ReturnStmt(expr?)),
+    ! => {
+        E::report_parse_err(db, <>);
+        None
+    },
+}
+
+pub Expr : Option<Expr<'db>> = {
+    <kind: WithSpan<ExprKind>> => {
+        let (kind, span) = kind;
+        Some(Expr { kind: kind?, span })
+    },
+    ! => {
+        E::report_parse_err(db, <>);
+        None
+    },
+}
+
+ExprKind: Option<ExprKind<'db>> = {
+    "(" ")" => Some(ExprKind::VoidLit),
+    <n:Int> => Some(ExprKind::IntLit(n)),
+    <s:String> => Some(ExprKind::StringLit(Symbol::new(db, s))),
+    <v:Var> => Some(ExprKind::Var(v)),
+    <expr:Expr> "." <sym:SymbolSpan> "(" <args:Comma<Expr>> ")" => 
+        Some(ExprKind::MethodCall { expr: P(expr?), sym, args: args.into_iter().collect::<Option<_>>()? }),
+    <expr:Expr> "." <sym:SymbolSpan> => Some(ExprKind::GetAttr { expr: P(expr?), sym }),
+    "(" <l:Expr> "+" <r:Expr> ")" => Some(ExprKind::Add { lhs: P(l?), rhs: P(r?) }),
+    <path:PathSpan> "(" <args:Comma<Expr>> ")" => Some(ExprKind::Call { path, args: args.into_iter().collect::<Option<_>>()? }),
+    "{" <args:Comma<(<SymbolSpan> ":" <Expr>)>> "}" => {
+        let args = args.into_iter().map(|(s, e)| Some((s, e?))).collect::<Option<_>>()?;
+        Some(ExprKind::Struct { args })
+    },
+    "(" <e:ExprKind> ")" => Some(e?)
+}
+
+Var : Var<'db> = <l:@L> <name:SymbolSpan> <ty:(":" <Type>)?> <r:@L> => {
+    Var { name, ty: ty.flatten(), span: l.span(r) }
+};
+
+pub Type : Option<Type<'db>> = <t: WithSpan<TypeKind>> => {
+    let (kind, span) = t;
+    Some(Type::new(db, kind?, span))
+};
+
+TypeKind : Option<TypeKind<'db>> = {
+    "(" ")" => Some(TypeKind::Void),
+    "{" <fields:Comma<Var>> "}" => {
+        let fields = fields.into_iter().map(|f| f.into_tvar(db)).collect::<Option<_>>()?;
+        Some(TypeKind::Struct { fields })
+    },
+    <s:Path> => Some(TypeKind::Symbol(s)),
+}
+
+PathSpan : PathSpan<'db> = <v: WithSpan<Path>> => {
+    let (path, span) = v;
+    PathSpan { path, span }
+};
+
+
+Path : Path<'db> = <mut v:(<Symbol> "::")*> <e:Symbol> => {
+    v.push(e);
+    Path::new(db, v)
+};
+
+
+SymbolSpan : SymbolSpan<'db> = <v: WithSpan<Symbol>> => {
+    let (sym, span) = v;
+    SymbolSpan { sym, span }
+};
+
+Symbol : Symbol<'db> = <i:Ident> => Symbol::new(db, i.name.view().into());
+
+WithSpan<T> : (T, Span) = <lloc:@L> <t: T> <rloc:@L> => (t, lloc.span(rloc));
+
+Comma<T>: Vec<T> = {
+    <mut v:(<T> ",")*> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            v.push(e);
+            v
+        }
+    }
+};
+
+
+extern {
+    type Location = Loc;
+    type Error = LexError;
+
+    enum Tok {
+        "interface" => Tok::Interface,
+        "class" => Tok::Class,
+        "type" => Tok::Type,
+        "fn" => Tok::Fn,
+        "for" => Tok::For,
+        "let" => Tok::Let,
+        "return" => Tok::Return,
+        "this" => Tok::This,
+        "+" => Tok::Plus,
+        "=" => Tok::Equal,
+        "." => Tok::Dot,
+        "(" => Tok::LParen,
+        ")" => Tok::RParen,
+        // "()" => Tok::DoubleParen,
+        "{" => Tok::LBrace,
+        "}" => Tok::RBrace,
+        ":" => Tok::Colon,
+        "::" => Tok::ColonAcc,
+        ";" => Tok::SemiColon,
+        "," => Tok::Comma,
+        Ident => Tok::Ident(<Ident>),
+        Int => Tok::Int(<i32>),
+        String => Tok::String(<String>)
+    }
+}
+
