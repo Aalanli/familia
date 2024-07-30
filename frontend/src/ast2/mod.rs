@@ -299,6 +299,8 @@ mod test_ast {
         let db = salsa::default_database();
         let foo1 = Foo::new(&db, "name".into(), 1);
         let foo2 = Foo::new(&db, "name".into(), 2);
+        let foo3 = Foo::new(&db, "name".into(), 1);
         assert!(foo1 != foo2);
+        assert!(foo1 == foo3);
     }
 }
