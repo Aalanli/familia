@@ -19,7 +19,6 @@ log = "0.4.22"
 derive-new = "0.6.0"
 salsa = { git = "https://github.com/salsa-rs/salsa" }
 ariadne = "0.4.1"
-bevy_reflect = "0.14.0"
 
 [dev-dependencies]
 insta = { version = "1.39.0", features = ["yaml"] }

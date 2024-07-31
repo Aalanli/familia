@@ -291,7 +291,7 @@ mod test_ast {
     struct Foo<'db> {
         pub name: String,
         #[no_eq]
-        pub idx: i32
+        pub idx: i32,
     }
 
     #[test]
