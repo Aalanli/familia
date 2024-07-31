@@ -18,6 +18,7 @@ colored = "2.1.0"
 log = "0.4.22"
 derive-new = "0.6.0"
 ariadne = "0.4.1"
+chumsky = { git = "https://github.com/zesterer/chumsky", features = ["label"] }
 
 [dev-dependencies]
 insta = { version = "1.39.0", features = ["yaml"] }

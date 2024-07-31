@@ -7,7 +7,9 @@ use crate::impl_id;
 
 use derive_new::new;
 
-pub use super::lexer::Span;
+// pub use super::lexer::Span;
+use chumsky::prelude::SimpleSpan;
+type Span = SimpleSpan<usize>;
 
 
 // for convenience in lalrpop
@@ -58,7 +60,7 @@ pub struct Var {
     pub ty: Option<TypeId>,
 }
 
-#[derive(Eq, PartialEq, Clone, Hash, Debug)]
+#[derive(Eq, PartialEq, Clone, Hash, Debug, new)]
 pub struct TypedVar {
     pub name: SymbolSpan,
     pub ty: TypeId,

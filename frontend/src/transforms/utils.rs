@@ -18,7 +18,7 @@ impl<'a, K: ?Sized> Hash for PointerHashKey<'a, K> {
 }
 
 impl<'a, K: ?Sized> PartialEq for PointerHashKey<'a, K> {
-    fn eq(&self, other: &Self) -> bool {
+fn eq(&self, other: &Self) -> bool {
         std::ptr::addr_eq(self.key as *const K, other.key as *const K)
     }
 }
