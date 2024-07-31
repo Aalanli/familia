@@ -2,14 +2,14 @@ use lalrpop_util::{lalrpop_mod, ParseError};
 
 use crate::ast2::Module;
 use crate::lexer::Lexer;
-use crate::{Db, ProgramSource};
+use crate::{ProgramSource};
 
-lalrpop_mod!(pub familia2);
+// lalrpop_mod!(pub familia2);
 
-#[salsa::tracked]
-pub fn parse<'db>(db: &'db dyn Db, src: ProgramSource) {
-    // let k = familia2::TestParser::new().parse(db, "tokens".chars());
-}
+// #[salsa::tracked]
+// pub fn parse<'db>(db: &'db dyn Db, src: ProgramSource) {
+//     // let k = familia2::TestParser::new().parse(db, "tokens".chars());
+// }
 
 #[cfg(test)]
 mod test_parse {

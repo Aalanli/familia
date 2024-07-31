@@ -1,206 +1,180 @@
 use std::ops::ControlFlow;
+use std::ops::Deref;
+use std::ops::DerefMut;
 
-use crate::ProgramSource;
+use crate::ProgramSrcId;
+use crate::impl_id;
+
 use derive_new::new;
 
 pub use super::lexer::Span;
 
+
+// for convenience in lalrpop
 #[allow(non_snake_case)]
 pub fn P<T>(x: T) -> Box<T> {
     Box::new(x)
 }
 
-#[salsa::interned]
-pub struct Symbol<'db> {
-    #[return_ref]
-    pub sym: String,
+impl_id!(Symbol, intern String);
+
+impl_id!(Path, intern Vec<Symbol>);
+
+#[derive(new, Debug, Clone, Hash, PartialEq, Eq)]
+pub struct WithSpan<T> {
+    x: T,
+    pub span: Span
 }
 
-#[salsa::interned]
-pub struct Path<'db> {
-    #[return_ref]
-    pub symbols: Vec<Symbol<'db>>,
-}
-
-#[derive(Eq, PartialEq, Copy, Clone, Hash, Debug, salsa::Update)]
-pub struct PathSpan<'db> {
-    pub path: Path<'db>,
-    pub span: Span,
-}
-
-#[derive(Eq, PartialEq, Copy, Clone, Hash, Debug, salsa::Update)]
-pub struct SymbolSpan<'db> {
-    pub sym: Symbol<'db>,
-    pub span: Span,
-}
-
-#[salsa::interned]
-pub struct Type<'db> {
-    #[return_ref]
-    pub kind: TypeKind<'db>,
-    pub span: Span,
-}
-
-#[derive(Eq, PartialEq, Clone, Hash, Debug, salsa::Update)]
-pub enum TypeKind<'db> {
-    Void,
-    Struct { fields: Vec<TypedVar<'db>> },
-    Symbol(Path<'db>),
-}
-
-#[derive(Eq, PartialEq, Clone, Hash, Debug, salsa::Update)]
-pub struct Var<'db> {
-    pub name: SymbolSpan<'db>,
-    pub ty: Option<Type<'db>>,
-    pub span: Span,
-}
-
-impl<'db> Var<'db> {
-    pub fn into_tvar(self, db: &dyn crate::Db) -> Option<TypedVar<'db>> {
-        if self.ty.is_none() {
-            crate::Diagnostic::report_syntax_err(db, "expected type annotation");
-        }
-        Some(TypedVar {
-            name: self.name,
-            ty: self.ty?,
-            span: self.span,
-        })
+impl<T> Deref for WithSpan<T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &self.x
     }
 }
 
-#[derive(Eq, PartialEq, Clone, Hash, Debug, salsa::Update)]
-pub struct TypedVar<'db> {
-    pub name: SymbolSpan<'db>,
-    pub ty: Type<'db>,
+impl<T> DerefMut for WithSpan<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.x
+    }
+}
+
+impl_id!(TypeId, Type);
+pub type Type = WithSpan<TypeKind>;
+pub type SymbolSpan = WithSpan<Symbol>;
+pub type PathSpan = WithSpan<Path>;
+
+
+#[derive(Eq, PartialEq, Clone, Hash, Debug)]
+pub enum TypeKind {
+    Void,
+    Struct { fields: Vec<TypedVar> },
+    Symbol(Path),
+}
+
+#[derive(Eq, PartialEq, Clone, Hash, Debug)]
+pub struct Var {
+    pub name: SymbolSpan,
+    pub ty: Option<TypeId>,
+}
+
+#[derive(Eq, PartialEq, Clone, Hash, Debug)]
+pub struct TypedVar {
+    pub name: SymbolSpan,
+    pub ty: TypeId,
+}
+
+impl_id!(ModuleId, Module);
+pub struct Module {
+    pub name: Option<SymbolSpan>,
+    pub body: Vec<Decls>,
+    pub src: ProgramSrcId,
+    pub span: Span
+}
+
+impl_id!(InterfaceDeclId, InterfaceDecl);
+pub struct InterfaceDecl {
+    pub name: SymbolSpan,
+    pub body: Vec<Decls>,
+    pub span: Span
+}
+
+impl_id!(ClassImplId, ClassImpl);
+pub struct ClassImpl {
+    pub name: SymbolSpan,
+    pub for_it: Option<PathSpan>,
+    pub body: Vec<Decls>,
+    pub span: Span
+}
+
+impl_id!(FnDeclId, FnDecl);
+pub struct FnDecl {
+    pub name: SymbolSpan,
+    pub args: Vec<TypedVar>,
+    pub res_ty: TypeId,
+    pub span: Span
+}
+
+impl_id!(FnImplId, FnImpl);
+pub struct FnImpl {
+    pub decl: FnDecl,
+    pub body: Vec<Stmt>,
+    pub span: Span
+}
+
+impl_id!(TypeDeclId, TypeDecl);
+pub struct TypeDecl {
+    pub name: SymbolSpan,
+    pub type_: TypeId,
+    pub span: Span
+}
+
+#[derive(Eq, PartialEq, Clone, Hash, Debug)]
+pub enum Decls {
+    Interface(InterfaceDeclId),
+    Class(ClassImplId),
+    FnDecl(FnDeclId),
+    FnImpl(FnImplId),
+    TyDecl(TypeDeclId),
+}
+
+#[derive(Eq, PartialEq, Clone, Hash, Debug)]
+pub struct Stmt {
+    pub kind: StmtKind,
     pub span: Span,
 }
 
-#[salsa::tracked]
-pub struct Module<'db> {
-    #[id]
-    pub name: Symbol<'db>,
-    pub name_span: Span,
-    #[return_ref]
-    pub body: Vec<Decls<'db>>,
-
-    pub src: ProgramSource,
+#[derive(Eq, PartialEq, Clone, Hash, Debug)]
+pub enum StmtKind {
+    LetStmt { var: Var, expr: Expr },
+    ExprStmt(Expr),
+    AssignStmt { lhs: Expr, rhs: Expr },
+    ReturnStmt(Expr),
 }
 
-#[salsa::tracked]
-pub struct InterfaceDecl<'db> {
-    #[id]
-    pub name: Symbol<'db>,
-    pub name_span: Span,
-    #[return_ref]
-    pub body: Vec<Decls<'db>>,
-}
-
-#[salsa::tracked]
-pub struct ClassImpl<'db> {
-    #[id]
-    pub name: Symbol<'db>,
-    pub name_span: Span,
-    pub for_it: Option<Path<'db>>,
-    #[return_ref]
-    pub body: Vec<Decls<'db>>,
-}
-
-#[salsa::tracked]
-pub struct FnDecl<'db> {
-    #[id]
-    pub name: Symbol<'db>,
-    pub name_span: Span,
-    #[return_ref]
-    pub args: Vec<Var<'db>>,
-    pub res_ty: Type<'db>,
-}
-
-#[salsa::tracked]
-pub struct FnImpl<'db> {
-    #[id]
-    pub name: Symbol<'db>,
-    pub name_span: Span,
-    #[return_ref]
-    pub args: Vec<Var<'db>>,
-    pub res_ty: Type<'db>,
-    #[return_ref]
-    pub body: Vec<Stmt<'db>>,
-}
-
-#[salsa::tracked]
-pub struct TypeDecl<'db> {
-    #[id]
-    pub name: Symbol<'db>,
-    pub name_span: Span,
-    pub type_: Type<'db>,
-}
-
-#[derive(Eq, PartialEq, Clone, Hash, Debug, salsa::Update)]
-pub enum Decls<'db> {
-    Interface(InterfaceDecl<'db>),
-    Class(ClassImpl<'db>),
-    FnDecl(FnDecl<'db>),
-    FnImpl(FnImpl<'db>),
-    TyDecl(TypeDecl<'db>),
-}
-
-#[derive(Eq, PartialEq, Clone, Hash, Debug, salsa::Update)]
-pub struct Stmt<'db> {
-    pub kind: StmtKind<'db>,
+#[derive(Eq, PartialEq, Clone, Hash, Debug)]
+pub struct Expr {
+    pub kind: ExprKind,
     pub span: Span,
 }
 
-#[derive(Eq, PartialEq, Clone, Hash, Debug, salsa::Update)]
-pub enum StmtKind<'db> {
-    LetStmt { var: Var<'db>, expr: Expr<'db> },
-    ExprStmt(Expr<'db>),
-    AssignStmt { lhs: Expr<'db>, rhs: Expr<'db> },
-    ReturnStmt(Expr<'db>),
-}
-
-#[derive(Eq, PartialEq, Clone, Hash, Debug, salsa::Update)]
-pub struct Expr<'db> {
-    pub kind: ExprKind<'db>,
-    pub span: Span,
-}
-
-#[derive(Eq, PartialEq, Clone, Hash, Debug, salsa::Update)]
-pub enum ExprKind<'db> {
-    Var(Var<'db>),
+#[derive(Eq, PartialEq, Clone, Hash, Debug)]
+pub enum ExprKind {
+    Var(Var),
     VoidLit,
     IntLit(i32),
-    StringLit(Symbol<'db>),
+    StringLit(Symbol),
     MethodCall {
-        expr: Box<Expr<'db>>,
-        sym: SymbolSpan<'db>,
-        args: Vec<Expr<'db>>,
+        expr: Box<Expr>,
+        sym: SymbolSpan,
+        args: Vec<Expr>,
     },
     GetAttr {
-        expr: Box<Expr<'db>>,
-        sym: SymbolSpan<'db>,
+        expr: Box<Expr>,
+        sym: SymbolSpan,
     },
     Add {
-        lhs: Box<Expr<'db>>,
-        rhs: Box<Expr<'db>>,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
     },
     Call {
-        path: PathSpan<'db>,
-        args: Vec<Expr<'db>>,
+        path: PathSpan,
+        args: Vec<Expr>,
     },
     Struct {
-        args: Vec<(SymbolSpan<'db>, Expr<'db>)>,
+        args: Vec<(SymbolSpan, Expr)>,
     },
 }
 
-pub trait Visitor<'db>: Sized {
+pub trait Visitor: Sized {
     type Result: VisitorResult;
 
-    fn visit_stmt(&mut self, stmt: &Stmt<'db>) -> Self::Result {
+    fn visit_stmt(&mut self, stmt: &Stmt) -> Self::Result {
         walk_stmt(self, stmt)
     }
 }
 
-pub fn walk_stmt<'db, V: Visitor<'db>>(visitor: &mut V, stmt: &Stmt<'db>) -> V::Result {
+pub fn walk_stmt<'db, V: Visitor>(visitor: &mut V, stmt: &Stmt) -> V::Result {
     todo!()
 }
 
@@ -214,10 +188,6 @@ pub trait VisitorResult {
 }
 
 impl VisitorResult for () {
-    #[cfg(feature = "nightly")]
-    type Residual = !;
-
-    #[cfg(not(feature = "nightly"))]
     type Residual = core::convert::Infallible;
 
     fn output() -> Self {}
@@ -287,20 +257,4 @@ macro_rules! walk_visitable_list {
 
 #[cfg(test)]
 mod test_ast {
-    #[salsa::interned]
-    struct Foo<'db> {
-        pub name: String,
-        #[no_eq]
-        pub idx: i32,
-    }
-
-    #[test]
-    fn test_intern_eq() {
-        let db = salsa::default_database();
-        let foo1 = Foo::new(&db, "name".into(), 1);
-        let foo2 = Foo::new(&db, "name".into(), 2);
-        let foo3 = Foo::new(&db, "name".into(), 1);
-        assert!(foo1 != foo2);
-        assert!(foo1 == foo3);
-    }
 }

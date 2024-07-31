@@ -155,7 +155,7 @@ impl Db {
 
 #[macro_export]
 macro_rules! impl_id {
-    ($id:ident, $node:ident) => {
+    ($id:ident, $node:ty) => {
         #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $id(crate::context::NodeId);
 
@@ -220,7 +220,7 @@ macro_rules! impl_id {
         }
     };
 
-    ($id:ident, intern $node:ident) => {
+    ($id:ident, intern $node:ty) => {
         #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $id(crate::context::NodeId);
 
@@ -245,7 +245,7 @@ macro_rules! impl_id {
                 &self,
                 attr: T,
                 ir: &crate::context::Db,
-            ) -> Result<()> {
+            ) -> anyhow::Result<()> {
                 ir.add_attribute(self.0, attr)
             }
 

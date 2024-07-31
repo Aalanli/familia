@@ -4,14 +4,6 @@ use std::fmt::Display;
 pub mod ptr;
 pub use ptr::P;
 
-#[salsa::input]
-pub struct ProgramSrc {
-    #[return_ref]
-    file: Option<String>,
-    #[return_ref]
-    text: String,
-}
-
 #[derive(Clone, Debug)]
 pub struct Var {
     pub name: Ident,

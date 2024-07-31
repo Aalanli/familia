@@ -19,27 +19,14 @@ use std::{
 };
 
 use derive_new::new;
-use salsa::{Accumulator, Database as Db};
 
-#[derive(Default)]
-#[salsa::db]
-pub struct Database {
-    storage: salsa::Storage<Self>,
-}
-
-#[salsa::db]
-impl salsa::Database for Database {}
-
-#[salsa::input]
+impl_id!(ProgramSrcId, ProgramSource);
 pub struct ProgramSource {
-    #[return_ref]
     pub file: String,
-
-    #[return_ref]
     pub text: String,
 }
 
-#[salsa::accumulator]
+
 #[derive(new)]
 pub struct Diagnostic {
     pub span: lexer::Span,
@@ -49,24 +36,20 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    fn report(db: &dyn Db, span: lexer::Span, msg: impl Into<String>) {
-        Diagnostic::new(span, msg.into()).accumulate(db);
-    }
+    // fn report(db: &dyn Db, span: lexer::Span, msg: impl Into<String>) {
+    //     Diagnostic::new(span, msg.into()).accumulate(db);
+    // }
 
-    fn report_syntax_err(db: &dyn Db, msg: impl Into<String>) {
-        todo!()
-    }
+    // fn report_syntax_err(db: &dyn Db, msg: impl Into<String>) {
+    //     todo!()
+    // }
 
-    fn report_parse_err(db: &dyn Db, err: ErrorRecovery<lexer::Loc, lexer::Tok, lexer::LexError>) {
-        todo!()
-    }
+    // fn report_parse_err(db: &dyn Db, err: ErrorRecovery<lexer::Loc, lexer::Tok, lexer::LexError>) {
+    //     todo!()
+    // }
 }
 use lalrpop_util::ErrorRecovery;
 
-fn test(db: &dyn Db) {
-    let src = ProgramSource::new(db, "file, text".into(), "test".into());
-    let txt = src.text(db);
-}
 
 #[derive(Debug, Clone)]
 pub enum ErrorKind {
