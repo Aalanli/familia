@@ -1,0 +1,5 @@
+---
+source: frontend/src/parser2.rs
+expression: res
+---
+"Expr { kind: GetAttr { expr: Expr { kind: Call { object: Expr { kind: Add { lhs: Expr { kind: Call { object: Expr { kind: GetAttr { expr: Expr { kind: Var(Var { name: WithSpan { x: Symbol(NodeId(0)), span: 2..3 }, ty: None }), span: 2..3 }, sym: WithSpan { x: Symbol(NodeId(0)), span: 4..5 } }, span: 2..5 }, args: [Expr { kind: IntLit(2), span: 6..7 }, Expr { kind: StringLit(Symbol(NodeId(1))), span: 9..12 }] }, span: 2..13 }, rhs: Expr { kind: IntLit(3), span: 16..17 } }, span: 2..17 }, args: [] }, span: 1..20 }, sym: WithSpan { x: Symbol(NodeId(2)), span: 22..23 } }, span: 0..23 }"

@@ -146,11 +146,6 @@ pub enum ExprKind {
     VoidLit,
     IntLit(i32),
     StringLit(Symbol),
-    MethodCall {
-        expr: Box<Expr>,
-        sym: SymbolSpan,
-        args: Vec<Expr>,
-    },
     GetAttr {
         expr: Box<Expr>,
         sym: SymbolSpan,
@@ -160,7 +155,7 @@ pub enum ExprKind {
         rhs: Box<Expr>,
     },
     Call {
-        path: PathSpan,
+        object: Box<Expr>,
         args: Vec<Expr>,
     },
     Struct {

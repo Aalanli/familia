@@ -104,6 +104,27 @@ fn symbol_span<'db, 'tokens: 'db, 'src: 'tokens>(db: &'db Db) -> impl Parser<
     })
 }
 
+fn parse_path<'db, 'tokens: 'db, 'src: 'tokens>(db: &'db Db) -> impl Parser<
+    'tokens,
+    ParserInput<'tokens, 'src>,
+    Path,
+    extra::Err<Rich<'tokens, Token<'src>, Span>>
+    > + Clone + 'db {
+    let ident = select! { Token::Ident(i) => i };
+    let raw_symbol = ident.map(|ident| {
+            let sym = Symbol::new(db, ident.to_string());
+            sym
+        });
+
+    let path = raw_symbol
+        .separated_by(just(Token::Ctrl('.')))
+        .at_least(1)
+        .collect::<Vec<_>>()
+        .map(|x| {
+            Path::new(db, x)
+        });
+    path
+}
 
 fn type_parser<'db, 'tokens: 'db, 'src: 'tokens>(db: &'db Db) -> impl Parser<
     'tokens,
@@ -115,20 +136,6 @@ fn type_parser<'db, 'tokens: 'db, 'src: 'tokens>(db: &'db Db) -> impl Parser<
     recursive(|type_parser| {
         let void = just(Token::Ctrl('(')).ignore_then(just(Token::Ctrl(')')))
             .map(|_| TypeKind::Void);
-
-        let ident = select! { Token::Ident(i) => i };
-        let raw_symbol = ident.map_with(move |ident, e| {
-                let sym = Symbol::new(db, ident.to_string());
-                sym
-            });
-
-        let path = raw_symbol
-            .separated_by(just(Token::Ctrl('.')))
-            .at_least(1)
-            .collect::<Vec<_>>()
-            .map(|x| {
-                TypeKind::Symbol(Path::new(db, x))
-            });
         
         let typed_var = symbol_span(db)
             .then_ignore(just(Token::Ctrl(':')))
@@ -146,47 +153,108 @@ fn type_parser<'db, 'tokens: 'db, 'src: 'tokens>(db: &'db Db) -> impl Parser<
             })
             .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}'))).labelled("struct");
         
-        void.or(path).or(structure)
+        void
+            .or(parse_path(db).map(|p| TypeKind::Symbol(p)))
+            .or(structure)
             .map_with(|tykind, e| {
                 TypeId::new(db, WithSpan::new(tykind, e.span()))
             })
     }) 
 }
 
-// fn expr_parser<'db, 'tokens: 'db, 'src: 'tokens>(db: &'db Db) -> impl Parser<
-//     'tokens,
-//     ParserInput<'tokens, 'src>,
-//     Expr,
-//     extra::Err<Rich<'tokens, Token<'src>, Span>>
-// > + Clone + 'db {
-//     recursive(|expr| {
+fn expr_parser<'db, 'tokens: 'db, 'src: 'tokens>(db: &'db Db) -> impl Parser<
+    'tokens,
+    ParserInput<'tokens, 'src>,
+    Expr,
+    extra::Err<Rich<'tokens, Token<'src>, Span>>
+> + Clone + 'db {
+    recursive(|expr| {
 
-//     })
-// }
+        let ty_hint = just(Token::Ctrl(':')).ignore_then(type_parser(db)).or_not();
+
+        let var = symbol_span(db).then(ty_hint).map(|(s, ty)| ExprKind::Var(Var {name: s, ty}));
+            
+        let void_lit = just(Token::Ctrl('('))
+            .ignored().then_ignore(just(Token::Ctrl(')'))).map(|_| ExprKind::VoidLit);
+
+        let int_lit = select! {Token::I32(i) => i}.map(|i| ExprKind::IntLit(i));
+        let str_lit = select! { Token::Str(s) => s }.map(|s| ExprKind::StringLit(Symbol::new(db, s.to_string())));
+
+        let items = expr
+            .clone()
+            .separated_by(just(Token::Ctrl(',')))
+            .allow_trailing()
+            .collect::<Vec<_>>();
+        
+        let atom = var
+            .or(void_lit)
+            .or(int_lit)
+            .or(str_lit)
+            .map_with(|kind, e1| 
+                Expr { kind, span: e1.span() })
+            .or(expr.clone().delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')'))));
+
+        
+        let getattr = atom.foldl_with(
+            just(Token::Ctrl('.')).ignore_then(symbol_span(db)).repeated(),
+            |a, b, e| {
+                Expr { kind: ExprKind::GetAttr { expr: Box::new(a), sym: b }, span: e.span() }
+            });
+
+        let call = getattr.foldl_with(
+            items
+                .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')')))
+                .repeated(),
+            |f, args, e| Expr{kind: ExprKind::Call { object: Box::new(f), args}, span: e.span()},
+        );
+
+
+        let op = just(Token::Op("+")).ignored();
+        let add = call.clone()
+            .foldl_with(op.then(call).repeated(), |a, (_, b), e| {
+                Expr { kind: ExprKind::Add { lhs: Box::new(a), rhs: Box::new(b) }, span: e.span() }
+            });
+        
+        
+
+
+        let expr = add;
+
+        expr
+    })
+}
 
 #[cfg(test)]
 mod test_parse {
-    use std::io;
-
+    use fmt::Display;
     use insta::assert_debug_snapshot;
-    use lalrpop_util::ErrorRecovery;
 
     use crate::Diagnostic;
 
     use super::*;
-    // fn parse_stmt(stmt: &str) -> String {
-    //     let db = crate::Database::default();
-    //     let stmt = familia2::StmtParser::new().parse(&db, Lexer::new(stmt.chars()));
-    //     match stmt {
-    //         Ok(s) => format!("{s:?}"),
-    //         Err(error) => {
-    //             let err = ErrorRecovery { error, vec![] };
-    //             Diagnostic::report_parse_err(&db, err);
-    //             let errors =
-    //         }
-    //     }
 
-    // }
+    macro_rules! run_parser {
+        ($src:literal, $parser:expr) => {
+            {
+                let mut w = Vec::new();
+                let (tokens, err) = lexer().parse(&($src)).into_output_errors();
+                let errs = err.into_iter().map(|e| e.map_token(|c| c.to_string())).collect::<Vec<_>>();
+                if tokens.is_none() {
+                    display_err(&mut w, $src.to_string(), "L".to_string(), &errs);
+                } else {
+                    let (item, err_parse) = ($parser).parse(tokens.as_ref().unwrap().as_slice().spanned(($src.len()..$src.len()).into())).into_output_errors();
+                    if let Some(item) = item {
+                        use std::io::Write;
+                        write!(w, "{:?}", item).unwrap();
+                    } else {
+                        display_err(&mut w, $src.to_string(), "L".to_string(), &err_parse);
+                    }
+                }
+
+                String::from_utf8(w).unwrap()
+            }
+        };
+    }
 
     #[test]
     fn test_lex1() {
@@ -194,7 +262,7 @@ mod test_parse {
         assert_debug_snapshot!((tokens, errs));
     }
 
-    fn display_err(mut w: impl std::io::Write, src: String, filename: String, err: &[Rich<Token>]) {
+    fn display_err<T: Display>(mut w: impl std::io::Write, src: String, filename: String, err: &[Rich<T>]) {
         // .map(|e| e.map_token(|tok| tok.to_string()))
         for e in err.into_iter() {
             Report::build(ReportKind::Error, filename.clone(), e.span().start)
@@ -202,12 +270,12 @@ mod test_parse {
                 .with_label(
                     Label::new((filename.clone(), e.span().into_range()))
                         .with_message(e.reason().to_string())
-                        .with_color(Color::Red),
+                        // .with_color(Color::Red),
                 )
                 .with_labels(e.contexts().map(|(label, span)| {
                     Label::new((filename.clone(), span.into_range()))
                         .with_message(format!("while parsing this {}", label))
-                        .with_color(Color::Yellow)
+                        // .with_color(Color::Yellow)
                 }))
                 .finish()
                 .write(sources([(filename.clone(), src.clone())]), &mut w)
@@ -216,15 +284,30 @@ mod test_parse {
     }
 
     #[test]
-    fn test_parse2() {
+    fn test_parse_type() {
         let db = Db::new();
-        let src = " {a: i32, b: {a: i32, c: String}} ";
-        let (tokens, err) = lexer().parse(src).into_output_errors();
-        let tokens = tokens.unwrap();
-        let (sym, err) = type_parser(&db).parse(tokens.as_slice().spanned((src.len()..src.len()).into())).into_output_errors();
-        display_err(io::stderr(), src.to_string(), "L".to_string(), &err);
-        if sym.is_some() {
-            println!("{:?}", db[sym.unwrap()]);
-        }
+        let res = run_parser!("{a: i32}", type_parser(&db));
+        assert_debug_snapshot!(res);
+    }
+
+    #[test]
+    fn test_parse_expr() {
+        let db = Db::new();
+        let res = run_parser!("((a.a(2, \"3\") + 3)()).c", expr_parser(&db));
+        assert_debug_snapshot!(res);
+    }
+
+    #[test]
+    fn test_parse_getattr() {
+        let db = Db::new();
+        let res = run_parser!("a.b.c.d.e", expr_parser(&db));
+        assert_debug_snapshot!(res);
+    }
+
+    #[test]
+    fn test_parse_getattr_fail() {
+        let db = Db::new();
+        let res = run_parser!("a().b", expr_parser(&db));
+        assert_debug_snapshot!(res);
     }
 }

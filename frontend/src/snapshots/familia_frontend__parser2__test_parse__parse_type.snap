@@ -1,0 +1,5 @@
+---
+source: frontend/src/parser2.rs
+expression: res
+---
+"TypeId(NodeId(4))"
