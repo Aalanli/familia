@@ -26,7 +26,6 @@ pub struct ProgramSource {
     pub text: String,
 }
 
-
 #[derive(new)]
 pub struct Diagnostic {
     pub span: lexer::Span,
@@ -49,7 +48,6 @@ impl Diagnostic {
     // }
 }
 use lalrpop_util::ErrorRecovery;
-
 
 #[derive(Debug, Clone)]
 pub enum ErrorKind {

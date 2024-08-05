@@ -1,10 +1,11 @@
 use crate::ast2::*;
 use crate::context::Db;
 use crate::lexer::Lexer;
-use crate::{ProgramSource};
+use crate::ProgramSource;
 
 use ariadne::{sources, Color, Label, Report, ReportKind};
-use chumsky::{prelude::*};
+use chumsky::prelude::*;
+use either::Either;
 use std::{collections::HashMap, env, fmt, fs};
 
 pub type Span = SimpleSpan<usize>;
@@ -40,8 +41,8 @@ impl<'src> fmt::Display for Token<'src> {
     }
 }
 
-
-fn lexer<'src>() -> impl Parser<'src, &'src str, Vec<(Token<'src>, Span)>, extra::Err<Rich<'src, char, Span>>> {
+fn lexer<'src>(
+) -> impl Parser<'src, &'src str, Vec<(Token<'src>, Span)>, extra::Err<Rich<'src, char, Span>>> {
     let num = text::int(10)
         .to_slice()
         .from_str()
@@ -91,12 +92,15 @@ fn lexer<'src>() -> impl Parser<'src, &'src str, Vec<(Token<'src>, Span)>, extra
 type ParserInput<'tokens, 'src> =
     chumsky::input::SpannedInput<Token<'src>, Span, &'tokens [(Token<'src>, Span)]>;
 
-fn symbol_span<'db, 'tokens: 'db, 'src: 'tokens>(db: &'db Db) -> impl Parser<
+fn symbol_span<'db, 'tokens: 'db, 'src: 'tokens>(
+    db: &'db Db,
+) -> impl Parser<
     'tokens,
     ParserInput<'tokens, 'src>,
     SymbolSpan,
-    extra::Err<Rich<'tokens, Token<'src>, Span>>
-    > + Clone + 'db {
+    extra::Err<Rich<'tokens, Token<'src>, Span>>,
+> + Clone
+       + 'db {
     let ident = select! { Token::Ident(i) => i };
     ident.map_with(move |ident, e| {
         let sym = Symbol::new(db, ident.to_string());
@@ -104,119 +108,142 @@ fn symbol_span<'db, 'tokens: 'db, 'src: 'tokens>(db: &'db Db) -> impl Parser<
     })
 }
 
-fn parse_path<'db, 'tokens: 'db, 'src: 'tokens>(db: &'db Db) -> impl Parser<
+fn parse_path<'db, 'tokens: 'db, 'src: 'tokens>(
+    db: &'db Db,
+) -> impl Parser<
     'tokens,
     ParserInput<'tokens, 'src>,
     Path,
-    extra::Err<Rich<'tokens, Token<'src>, Span>>
-    > + Clone + 'db {
+    extra::Err<Rich<'tokens, Token<'src>, Span>>,
+> + Clone
+       + 'db {
     let ident = select! { Token::Ident(i) => i };
     let raw_symbol = ident.map(|ident| {
-            let sym = Symbol::new(db, ident.to_string());
-            sym
-        });
+        let sym = Symbol::new(db, ident.to_string());
+        sym
+    });
 
     let path = raw_symbol
         .separated_by(just(Token::Ctrl('.')))
         .at_least(1)
         .collect::<Vec<_>>()
-        .map(|x| {
-            Path::new(db, x)
-        });
+        .map(|x| Path::new(db, x));
     path
 }
 
-fn type_parser<'db, 'tokens: 'db, 'src: 'tokens>(db: &'db Db) -> impl Parser<
+fn type_parser<'db, 'tokens: 'db, 'src: 'tokens>(
+    db: &'db Db,
+) -> impl Parser<
     'tokens,
     ParserInput<'tokens, 'src>,
     TypeId,
-    extra::Err<Rich<'tokens, Token<'src>, Span>>
-> + Clone + 'db {
-
+    extra::Err<Rich<'tokens, Token<'src>, Span>>,
+> + Clone
+       + 'db {
     recursive(|type_parser| {
-        let void = just(Token::Ctrl('(')).ignore_then(just(Token::Ctrl(')')))
+        let void = just(Token::Ctrl('('))
+            .ignore_then(just(Token::Ctrl(')')))
             .map(|_| TypeKind::Void);
-        
+
         let typed_var = symbol_span(db)
             .then_ignore(just(Token::Ctrl(':')))
             .then(type_parser.clone())
-            .map(|(s, t)| {
-                TypedVar::new(s, t)
-            });
-        
-        let structure = typed_var.separated_by(just(Token::Ctrl(',')))
+            .map(|(s, t)| TypedVar::new(s, t));
+
+        let structure = typed_var
+            .separated_by(just(Token::Ctrl(',')))
             .allow_trailing()
             .at_least(1)
             .collect::<Vec<_>>()
-            .map(|x| {
-                TypeKind::Struct { fields: x }
-            })
-            .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}'))).labelled("struct");
-        
-        void
-            .or(parse_path(db).map(|p| TypeKind::Symbol(p)))
+            .map(|x| TypeKind::Struct { fields: x })
+            .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')))
+            .labelled("struct");
+
+        void.or(parse_path(db).map(|p| TypeKind::Symbol(p)))
             .or(structure)
-            .map_with(|tykind, e| {
-                TypeId::new(db, WithSpan::new(tykind, e.span()))
-            })
-    }) 
+            .map_with(|tykind, e| TypeId::new(db, WithSpan::new(tykind, e.span())))
+    })
 }
 
-fn expr_parser<'db, 'tokens: 'db, 'src: 'tokens>(db: &'db Db) -> impl Parser<
+fn expr_parser<'db, 'tokens: 'db, 'src: 'tokens>(
+    db: &'db Db,
+) -> impl Parser<
     'tokens,
     ParserInput<'tokens, 'src>,
     Expr,
-    extra::Err<Rich<'tokens, Token<'src>, Span>>
-> + Clone + 'db {
+    extra::Err<Rich<'tokens, Token<'src>, Span>>,
+> + Clone
+       + 'db {
     recursive(|expr| {
-
         let ty_hint = just(Token::Ctrl(':')).ignore_then(type_parser(db)).or_not();
 
-        let var = symbol_span(db).then(ty_hint).map(|(s, ty)| ExprKind::Var(Var {name: s, ty}));
-            
+        let var = symbol_span(db)
+            .then(ty_hint)
+            .map(|(s, ty)| ExprKind::Var(Var { name: s, ty }));
+
         let void_lit = just(Token::Ctrl('('))
-            .ignored().then_ignore(just(Token::Ctrl(')'))).map(|_| ExprKind::VoidLit);
+            .ignored()
+            .then_ignore(just(Token::Ctrl(')')))
+            .map(|_| ExprKind::VoidLit);
 
         let int_lit = select! {Token::I32(i) => i}.map(|i| ExprKind::IntLit(i));
-        let str_lit = select! { Token::Str(s) => s }.map(|s| ExprKind::StringLit(Symbol::new(db, s.to_string())));
+        let str_lit = select! { Token::Str(s) => s }
+            .map(|s| ExprKind::StringLit(Symbol::new(db, s.to_string())));
 
         let items = expr
             .clone()
             .separated_by(just(Token::Ctrl(',')))
             .allow_trailing()
             .collect::<Vec<_>>();
-        
+
         let atom = var
             .or(void_lit)
             .or(int_lit)
             .or(str_lit)
-            .map_with(|kind, e1| 
-                Expr { kind, span: e1.span() })
-            .or(expr.clone().delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')'))));
+            .map_with(|kind, e1| Expr {
+                kind,
+                span: e1.span(),
+            })
+            .or(expr
+                .clone()
+                .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')'))));
 
-        
-        let getattr = atom.foldl_with(
-            just(Token::Ctrl('.')).ignore_then(symbol_span(db)).repeated(),
-            |a, b, e| {
-                Expr { kind: ExprKind::GetAttr { expr: Box::new(a), sym: b }, span: e.span() }
-            });
-
-        let call = getattr.foldl_with(
+        let call = atom.foldl_with(
             items
                 .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')')))
+                .map(Either::Left)
+                .or(just(Token::Ctrl('.'))
+                    .ignore_then(symbol_span(db))
+                    .map(Either::Right))
                 .repeated(),
-            |f, args, e| Expr{kind: ExprKind::Call { object: Box::new(f), args}, span: e.span()},
+            |f, a, e| {
+                let kind = match a {
+                    Either::Left(args) => ExprKind::Call {
+                        object: Box::new(f),
+                        args,
+                    },
+                    Either::Right(attr) => ExprKind::GetAttr {
+                        expr: Box::new(f),
+                        sym: attr,
+                    },
+                };
+                Expr {
+                    kind,
+                    span: e.span(),
+                }
+            },
         );
 
-
         let op = just(Token::Op("+")).ignored();
-        let add = call.clone()
-            .foldl_with(op.then(call).repeated(), |a, (_, b), e| {
-                Expr { kind: ExprKind::Add { lhs: Box::new(a), rhs: Box::new(b) }, span: e.span() }
+        let add = call
+            .clone()
+            .foldl_with(op.then(call).repeated(), |a, (_, b), e| Expr {
+                kind: ExprKind::Add {
+                    lhs: Box::new(a),
+                    rhs: Box::new(b),
+                },
+                span: e.span(),
             });
-        
-        
-
 
         let expr = add;
 
@@ -234,48 +261,63 @@ mod test_parse {
     use super::*;
 
     macro_rules! run_parser {
-        ($src:literal, $parser:expr) => {
-            {
-                let mut w = Vec::new();
-                let (tokens, err) = lexer().parse(&($src)).into_output_errors();
-                let errs = err.into_iter().map(|e| e.map_token(|c| c.to_string())).collect::<Vec<_>>();
-                if tokens.is_none() {
-                    display_err(&mut w, $src.to_string(), "L".to_string(), &errs);
+        ($src:literal, $parser:expr) => {{
+            let mut w = Vec::new();
+            let (tokens, err) = lexer().parse(&($src)).into_output_errors();
+            let errs = err
+                .into_iter()
+                .map(|e| e.map_token(|c| c.to_string()))
+                .collect::<Vec<_>>();
+            if tokens.is_none() {
+                display_err(&mut w, $src.to_string(), "L".to_string(), &errs);
+            } else {
+                let (item, err_parse) = ($parser)
+                    .parse(
+                        tokens
+                            .as_ref()
+                            .unwrap()
+                            .as_slice()
+                            .spanned(($src.len()..$src.len()).into()),
+                    )
+                    .into_output_errors();
+                if let Some(item) = item {
+                    use std::io::Write;
+                    write!(w, "{:?}", item).unwrap();
                 } else {
-                    let (item, err_parse) = ($parser).parse(tokens.as_ref().unwrap().as_slice().spanned(($src.len()..$src.len()).into())).into_output_errors();
-                    if let Some(item) = item {
-                        use std::io::Write;
-                        write!(w, "{:?}", item).unwrap();
-                    } else {
-                        display_err(&mut w, $src.to_string(), "L".to_string(), &err_parse);
-                    }
+                    display_err(&mut w, $src.to_string(), "L".to_string(), &err_parse);
                 }
-
-                String::from_utf8(w).unwrap()
             }
-        };
+
+            String::from_utf8(w).unwrap()
+        }};
     }
 
     #[test]
     fn test_lex1() {
-        let (tokens, errs) = lexer().parse("input a b ++ \"abc\" -+= let a return : { [").into_output_errors();
+        let (tokens, errs) = lexer()
+            .parse("input a b ++ \"abc\" -+= let a return : { [")
+            .into_output_errors();
         assert_debug_snapshot!((tokens, errs));
     }
 
-    fn display_err<T: Display>(mut w: impl std::io::Write, src: String, filename: String, err: &[Rich<T>]) {
+    fn display_err<T: Display>(
+        mut w: impl std::io::Write,
+        src: String,
+        filename: String,
+        err: &[Rich<T>],
+    ) {
         // .map(|e| e.map_token(|tok| tok.to_string()))
         for e in err.into_iter() {
             Report::build(ReportKind::Error, filename.clone(), e.span().start)
                 .with_message(e.to_string())
                 .with_label(
                     Label::new((filename.clone(), e.span().into_range()))
-                        .with_message(e.reason().to_string())
-                        // .with_color(Color::Red),
+                        .with_message(e.reason().to_string()), // .with_color(Color::Red),
                 )
                 .with_labels(e.contexts().map(|(label, span)| {
                     Label::new((filename.clone(), span.into_range()))
                         .with_message(format!("while parsing this {}", label))
-                        // .with_color(Color::Yellow)
+                    // .with_color(Color::Yellow)
                 }))
                 .finish()
                 .write(sources([(filename.clone(), src.clone())]), &mut w)

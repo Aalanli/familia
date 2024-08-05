@@ -2,15 +2,14 @@ use std::ops::ControlFlow;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use crate::ProgramSrcId;
 use crate::impl_id;
+use crate::ProgramSrcId;
 
 use derive_new::new;
 
 // pub use super::lexer::Span;
 use chumsky::prelude::SimpleSpan;
 type Span = SimpleSpan<usize>;
-
 
 // for convenience in lalrpop
 #[allow(non_snake_case)]
@@ -25,7 +24,7 @@ impl_id!(Path, intern Vec<Symbol>);
 #[derive(new, Debug, Clone, Hash, PartialEq, Eq)]
 pub struct WithSpan<T> {
     x: T,
-    pub span: Span
+    pub span: Span,
 }
 
 impl<T> Deref for WithSpan<T> {
@@ -45,7 +44,6 @@ impl_id!(TypeId, Type);
 pub type Type = WithSpan<TypeKind>;
 pub type SymbolSpan = WithSpan<Symbol>;
 pub type PathSpan = WithSpan<Path>;
-
 
 #[derive(Eq, PartialEq, Clone, Hash, Debug)]
 pub enum TypeKind {
@@ -71,14 +69,14 @@ pub struct Module {
     pub name: Option<SymbolSpan>,
     pub body: Vec<Decls>,
     pub src: ProgramSrcId,
-    pub span: Span
+    pub span: Span,
 }
 
 impl_id!(InterfaceDeclId, InterfaceDecl);
 pub struct InterfaceDecl {
     pub name: SymbolSpan,
     pub body: Vec<Decls>,
-    pub span: Span
+    pub span: Span,
 }
 
 impl_id!(ClassImplId, ClassImpl);
@@ -86,7 +84,7 @@ pub struct ClassImpl {
     pub name: SymbolSpan,
     pub for_it: Option<PathSpan>,
     pub body: Vec<Decls>,
-    pub span: Span
+    pub span: Span,
 }
 
 impl_id!(FnDeclId, FnDecl);
@@ -94,21 +92,21 @@ pub struct FnDecl {
     pub name: SymbolSpan,
     pub args: Vec<TypedVar>,
     pub res_ty: TypeId,
-    pub span: Span
+    pub span: Span,
 }
 
 impl_id!(FnImplId, FnImpl);
 pub struct FnImpl {
     pub decl: FnDecl,
     pub body: Vec<Stmt>,
-    pub span: Span
+    pub span: Span,
 }
 
 impl_id!(TypeDeclId, TypeDecl);
 pub struct TypeDecl {
     pub name: SymbolSpan,
     pub type_: TypeId,
-    pub span: Span
+    pub span: Span,
 }
 
 #[derive(Eq, PartialEq, Clone, Hash, Debug)]
@@ -146,21 +144,10 @@ pub enum ExprKind {
     VoidLit,
     IntLit(i32),
     StringLit(Symbol),
-    GetAttr {
-        expr: Box<Expr>,
-        sym: SymbolSpan,
-    },
-    Add {
-        lhs: Box<Expr>,
-        rhs: Box<Expr>,
-    },
-    Call {
-        object: Box<Expr>,
-        args: Vec<Expr>,
-    },
-    Struct {
-        args: Vec<(SymbolSpan, Expr)>,
-    },
+    GetAttr { expr: Box<Expr>, sym: SymbolSpan },
+    Add { lhs: Box<Expr>, rhs: Box<Expr> },
+    Call { object: Box<Expr>, args: Vec<Expr> },
+    Struct { args: Vec<(SymbolSpan, Expr)> },
 }
 
 pub trait Visitor: Sized {
@@ -253,5 +240,4 @@ macro_rules! walk_visitable_list {
 }
 
 #[cfg(test)]
-mod test_ast {
-}
+mod test_ast {}

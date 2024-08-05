@@ -2,4 +2,4 @@
 source: frontend/src/parser2.rs
 expression: res
 ---
-"\u{1b}[31mError:\u{1b}[0m found ) expected '(', '+', or end of input\n   \u{1b}[38;5;246m╭\u{1b}[0m\u{1b}[38;5;246m─\u{1b}[0m\u{1b}[38;5;246m[\u{1b}[0mL:1:3\u{1b}[38;5;246m]\u{1b}[0m\n   \u{1b}[38;5;246m│\u{1b}[0m\n \u{1b}[38;5;246m1 │\u{1b}[0m \u{1b}[38;5;249ma\u{1b}[0m\u{1b}[38;5;249m(\u{1b}[0m)\u{1b}[38;5;249m.\u{1b}[0m\u{1b}[38;5;249mb\u{1b}[0m\n \u{1b}[38;5;240m  │\u{1b}[0m   ┬  \n \u{1b}[38;5;240m  │\u{1b}[0m   ╰── found ) expected '(', '+', or end of input\n\u{1b}[38;5;246m───╯\u{1b}[0m\n"
+"Expr { kind: GetAttr { expr: Expr { kind: Call { object: Expr { kind: Var(Var { name: WithSpan { x: Symbol(NodeId(0)), span: 0..1 }, ty: None }), span: 0..1 }, args: [] }, span: 0..3 }, sym: WithSpan { x: Symbol(NodeId(1)), span: 4..5 } }, span: 0..5 }"
